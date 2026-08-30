@@ -1,0 +1,20 @@
+build/
+*.o
+*.d
+
+# Vendored SDL: staged by tools/fetch_sdl2.sh (desktop headers) and
+# tools/fetch_sdl2_android.sh (full source for the Android build).
+third_party/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+*.apk
+*.keystore
+
+# Python bytecode from the tools
+__pycache__/
+*.pyc

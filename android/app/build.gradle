@@ -1,0 +1,77 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.cleanroom.newrallyx'
+    compileSdk 34
+    buildToolsVersion '35.0.0'
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.cleanroom.newrallyx'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0-phase1'
+
+        externalNativeBuild {
+            cmake {
+                // 16 KB page alignment: Android 15+ devices refuse to load
+                // native libraries whose LOAD segments are only 4 KB aligned,
+                // and warn about it loudly before they do.
+                arguments '-DANDROID_STL=c++_shared',
+                          '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                // The four architectures shipped by real devices today.
+                abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    // Native libraries must be stored uncompressed and page-aligned in the
+    // APK for the 16 KB loader to map them directly.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            debuggable false                     // no "debuggable app" warning
+            signingConfig signingConfigs.debug   // phase 1: no release key yet
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// The level data lives once, at the repository root.  Copy it into the APK's
+// assets at build time rather than keeping a second copy in the Android tree.
+def levelAssets = layout.buildDirectory.dir('generated/assets')
+
+tasks.register('syncLevels', Copy) {
+    from rootProject.file('../levels')
+    into levelAssets.map { it.dir('levels') }
+    include '*.lvl'
+}
+
+// The background music loop, built by tools/make_music.py.
+tasks.register('syncAudio', Copy) {
+    from rootProject.file('../assets/audio')
+    into levelAssets.map { it.dir('audio') }
+    include '*.wav'
+}
+
+android.sourceSets.main.assets.srcDirs += levelAssets
+
+tasks.named('preBuild') { dependsOn 'syncLevels', 'syncAudio' }
