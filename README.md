@@ -60,6 +60,7 @@ exercised here.
 | `--windowed` | Run in a window instead of fullscreen |
 | `--fullscreen` | Start fullscreen (the default) |
 | `--round N` | Dev only: start at round N (handy for checking later layouts) |
+| `--seed N` | Fix the flag shuffle, so a game replays identically |
 | `--capture DIR` | Dev only: run a scripted demo headless and dump BMP frames |
 
 ## Android
@@ -154,6 +155,13 @@ nothing itself but doubles every flag taken after it, until the round ends or a 
 lost. The **Lucky Flag** pays a bonus scaled by the fuel left in the tank, so it is worth
 most when taken early.
 
+**The flags are re-scattered at the start of every round**, so the same maze never plays the
+same way twice. Placement is constrained rather than arbitrary: flags land on road, keep
+their distance from each other and from where you start (measured through the corridors, not
+as the crow flies), stay reachable, and never sit on a rock or inside the enemy pen. Losing a
+car does *not* reshuffle them — the round you are in keeps its layout, and the flags you have
+already banked stay banked.
+
 Every pursuit car in a round starts in the **enemy pen** — a single straight lane of six or
 seven tiles marked out in the level data, always at the far end of the maze from where you
 start (16+ tiles away through the corridors, typically 24). The whole pack sits there
@@ -191,7 +199,7 @@ src/
   entities/    Player, Enemy, Flag, Rock, SmokeCloud
   ai/          NavigationGraph, Pathfinding, EnemyAI
   gameplay/    Round, ScoreSystem, FuelSystem, LifeSystem, SmokeSystem,
-               ChallengeStage, LuckyFlagBonusCalculator
+               ChallengeStage, LuckyFlagBonusCalculator, FlagPlacer
   rendering/   Renderer, SpriteRenderer, HUD, Radar, Palette, Font, RoundTheme
   audio/       AudioManager (synth effects + music mixer)
 levels/        level01..level12.lvl  (external data, no maze is hard-coded)
@@ -199,7 +207,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         128 gameplay tests, run with `make test`
+tests/         144 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -280,7 +288,8 @@ maze
 ```
 
 Maze legend: `.` road, `#` wall, `R` rock, `F` flag, `S` special flag, `L` lucky flag,
-`P` player spawn, `E` enemy pen. The `E` tiles must form one contiguous straight run — the
+`P` player spawn, `E` enemy pen. The `F`/`S`/`L` positions set *how many* flags of each kind
+a round has; where they actually appear is re-rolled every round by `FlagPlacer`. The `E` tiles must form one contiguous straight run — the
 generator picks the farthest such run from the player spawn, and `make test` enforces both
 the shape and the distance on every shipped level. Regenerate with `make levels`. Rounds past the last
 authored level cycle back round with a difficulty step added each lap.

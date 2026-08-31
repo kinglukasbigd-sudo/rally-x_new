@@ -18,8 +18,9 @@ constexpr float ENEMY_HIT_RADIUS   = 11.f;
 constexpr float ENEMY_LAUNCH_DELAY = 1.4f;
 }
 
-void Round::load(const LevelData& level) {
+void Round::load(const LevelData& level, uint32_t flagSeed) {
     level_ = level;
+    flagSeed_ = flagSeed;
     camera_.setViewport(VIEW_W, VIEW_H);
     buildEnemyMap();
     // The navigation graph describes the maze, not the rocks: a car routes as
@@ -76,18 +77,56 @@ void Round::spawnEnemies() {
 }
 
 void Round::restart() {
+    placeFlags();
+    resetActors();
+}
+
+void Round::restart(uint32_t flagSeed) {
+    flagSeed_ = flagSeed;
+    restart();
+}
+
+void Round::placeFlags() {
     flags_.clear();
     required_ = 0;
     collected_ = 0;
 
+    // Count what the level asks for, then either honour its layout or shuffle
+    // one of the same shape.
+    int normal = 0, special = 0, lucky = 0;
     for (const auto& fs : level_.flags) {
+        if (fs.kind == 1)      ++special;
+        else if (fs.kind == 2) ++lucky;
+        else                   ++normal;
+    }
+
+    std::vector<FlagSpawn> spawns;
+    if (flagSeed_ == 0) {
+        spawns = level_.flags;                 // authored positions
+    } else {
+        FlagPlacer::Request req;
+        req.map         = &level_.map;
+        req.playerSpawn = level_.playerSpawn;
+        req.normal      = normal;
+        req.special     = special;
+        req.lucky       = lucky;
+
+        // Nothing may share a tile with a rock or sit inside the enemy pen.
+        req.reserved = level_.rocks;
+        req.reserved.insert(req.reserved.end(),
+                            level_.enemyPen.begin(), level_.enemyPen.end());
+
+        spawns = FlagPlacer::place(req, flagSeed_);
+        if (spawns.empty()) spawns = level_.flags;   // never leave a round empty
+    }
+
+    for (const auto& fs : spawns) {
         Flag f;
         f.pos  = Maze::tileCenterWorld(fs.tx, fs.ty);
         f.type = static_cast<FlagType>(fs.kind);
         flags_.push_back(f);
         if (f.type == FlagType::Normal) ++required_;
     }
-    resetActors();
 }
 
 void Round::restartAfterDeath() {

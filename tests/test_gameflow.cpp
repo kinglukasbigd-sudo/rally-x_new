@@ -8,6 +8,7 @@
 #include "world/LevelLoader.h"
 #include "core/TouchControls.h"
 #include <SDL.h>
+#include <algorithm>
 #include <cstdlib>
 
 using namespace rx;
@@ -408,4 +409,99 @@ TEST(a_tap_on_the_title_screen_still_starts_the_game) {
     CHECK(h.g.state() == GameState::StartScreen);
     tapScreen(h);
     CHECK(h.g.state() == GameState::Ready);
+}
+
+// ---------------------------------------------------------------------------
+// Flags are re-scattered per round -- but never mid-round.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Where the flags currently are, as a comparable fingerprint.
+std::vector<std::pair<int,int>> flagTiles(const Round& r) {
+    std::vector<std::pair<int,int>> t;
+    for (const auto& f : r.flags())
+        t.push_back({ TileMap::toTile(f.pos.x), TileMap::toTile(f.pos.y) });
+    std::sort(t.begin(), t.end());
+    return t;
+}
+
+} // namespace
+
+TEST(each_new_round_scatters_the_flags_somewhere_new) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    std::vector<std::vector<std::pair<int,int>>> seen;
+    for (int round = 1; round <= 4; ++round) {
+        const bool challenge = h.g.round().isChallenge();
+        CHECK(h.waitFor(challenge ? GameState::ChallengingStage : GameState::Playing, 60 * 10));
+
+        const auto tiles = flagTiles(h.g.round());
+        CHECK_EQ(static_cast<int>(tiles.size()), FLAGS_PER_ROUND + 2);
+        for (const auto& prior : seen) CHECK(tiles != prior);
+        seen.push_back(tiles);
+
+        h.g.debugCollectAllFlags();
+        h.run(1);
+        if (round < 4) CHECK(h.waitFor(GameState::Ready, 60 * 5));
+    }
+}
+
+TEST(losing_a_life_leaves_the_flags_exactly_where_they_are) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    const auto before = flagTiles(h.g.round());
+
+    CHECK(h.waitFor(GameState::PlayerDeath, 60 * 90));
+    CHECK(h.waitFor(GameState::Ready, 60 * 5));
+
+    // Same round, same layout: a lost car must not reshuffle the maze under
+    // the player, and must not undo the flags already banked.
+    CHECK_EQ(h.g.roundNumber(), 1);
+    CHECK(flagTiles(h.g.round()) == before);
+}
+
+TEST(replaying_the_same_round_number_still_differs_between_games) {
+    // Round 1 of one game and round 1 of the next must not be identical, or
+    // the shuffle is only per-round and not per-game.
+    HeadlessGame a; CHECK(a.ok);
+    a.press(Action::Start);
+    CHECK(a.waitFor(GameState::Playing, 300));
+    const auto first = flagTiles(a.g.round());
+
+    HeadlessGame b; CHECK(b.ok);
+    b.press(Action::Start);
+    CHECK(b.waitFor(GameState::Playing, 300));
+
+    CHECK(flagTiles(b.g.round()) != first);
+}
+
+TEST(a_fixed_seed_replays_the_same_layout) {
+    setenv("SDL_VIDEODRIVER", "dummy", 1);
+    setenv("SDL_AUDIODRIVER", "dummy", 1);
+
+    auto layoutWithSeed = [](uint32_t seed) {
+        Game g;
+        g.init(1, "levels", 1, false, false, TouchScheme::Swipe, seed);
+        g.input().beginFrame();
+        g.input().setFromExternal(Action::Start, true);
+        g.step(static_cast<float>(FIXED_DT));
+        for (int i = 0; i < 300 && g.state() != GameState::Playing; ++i) {
+            g.input().beginFrame();
+            g.step(static_cast<float>(FIXED_DT));
+        }
+        auto t = flagTiles(g.round());
+        g.shutdown();
+        return t;
+    };
+
+    const auto a = layoutWithSeed(20250831u);
+    const auto b = layoutWithSeed(20250831u);
+    const auto c = layoutWithSeed(11111111u);
+    CHECK(a == b);        // --seed makes a game repeatable
+    CHECK(a != c);        // a different seed lays out differently
 }

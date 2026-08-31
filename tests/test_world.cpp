@@ -325,3 +325,182 @@ TEST(the_burn_rate_climbs_and_shortens_each_normal_round) {
     CHECK(normals >= 8);
     CHECK(previous < 65.f);                   // and it really has tightened up
 }
+
+// ---------------------------------------------------------------------------
+// Flags are re-scattered at the start of every round.
+// ---------------------------------------------------------------------------
+
+#include "gameplay/FlagPlacer.h"
+
+namespace {
+
+LevelData shippedLevel(int n = 1) {
+    char path[64];
+    std::snprintf(path, sizeof path, "levels/level%02d.lvl", n);
+    LevelData d;
+    CHECK(LevelLoader::loadFromFile(path, d));
+    return d;
+}
+
+FlagPlacer::Request requestFor(const LevelData& d) {
+    FlagPlacer::Request req;
+    req.map         = &d.map;
+    req.playerSpawn = d.playerSpawn;
+    req.normal      = FLAGS_PER_ROUND;
+    req.special     = 1;
+    req.lucky       = 1;
+    req.reserved    = d.rocks;
+    req.reserved.insert(req.reserved.end(), d.enemyPen.begin(), d.enemyPen.end());
+    return req;
+}
+
+int manhattan(const FlagSpawn& a, const FlagSpawn& b) {
+    return std::abs(a.tx - b.tx) + std::abs(a.ty - b.ty);
+}
+
+} // namespace
+
+TEST(a_shuffle_places_the_full_set_of_flags) {
+    LevelData d = shippedLevel();
+    const auto flags = FlagPlacer::place(requestFor(d), 12345);
+
+    int normal = 0, special = 0, lucky = 0;
+    for (const auto& f : flags) {
+        if (f.kind == 1)      ++special;
+        else if (f.kind == 2) ++lucky;
+        else                  ++normal;
+    }
+    CHECK_EQ(normal, FLAGS_PER_ROUND);
+    CHECK_EQ(special, 1);
+    CHECK_EQ(lucky, 1);
+}
+
+TEST(shuffled_flags_land_somewhere_legal) {
+    LevelData d = shippedLevel();
+    const auto req = requestFor(d);
+
+    for (uint32_t seed = 1; seed <= 25; ++seed) {
+        const auto flags = FlagPlacer::place(req, seed * 7919u);
+        CHECK_EQ(static_cast<int>(flags.size()), FLAGS_PER_ROUND + 2);
+
+        for (const auto& f : flags) {
+            CHECK(d.map.isRoad(f.tx, f.ty));                      // never in a wall
+            CHECK(!(f.tx == d.playerSpawn.tx && f.ty == d.playerSpawn.ty));
+
+            for (const auto& r : d.rocks)                          // never on a rock
+                CHECK(!(r.tx == f.tx && r.ty == f.ty));
+            for (const auto& p : d.enemyPen)                       // never in the pen
+                CHECK(!(p.tx == f.tx && p.ty == f.ty));
+        }
+
+        // No two flags on the same tile.
+        for (size_t i = 0; i < flags.size(); ++i)
+            for (size_t j = i + 1; j < flags.size(); ++j)
+                CHECK(manhattan(flags[i], flags[j]) > 0);
+    }
+}
+
+TEST(shuffled_flags_stay_reachable_from_the_spawn) {
+    LevelData d = shippedLevel();
+    const auto flags = FlagPlacer::place(requestFor(d), 4242);
+
+    std::vector<uint8_t> seen(MAP_W * MAP_H, 0);
+    std::vector<std::pair<int,int>> queue{{d.playerSpawn.tx, d.playerSpawn.ty}};
+    seen[d.playerSpawn.ty * MAP_W + d.playerSpawn.tx] = 1;
+    for (size_t head = 0; head < queue.size(); ++head) {
+        auto [x, y] = queue[head];
+        const int dx[4] = {1,-1,0,0}, dy[4] = {0,0,1,-1};
+        for (int i = 0; i < 4; ++i) {
+            const int nx = x + dx[i], ny = y + dy[i];
+            if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+            if (seen[ny * MAP_W + nx] || !d.map.isRoad(nx, ny)) continue;
+            seen[ny * MAP_W + nx] = 1;
+            queue.push_back({nx, ny});
+        }
+    }
+    for (const auto& f : flags) CHECK(seen[f.ty * MAP_W + f.tx] != 0);
+}
+
+TEST(shuffled_flags_are_not_dumped_on_the_players_doorstep) {
+    LevelData d = shippedLevel();
+    const auto req = requestFor(d);
+
+    // Distance is measured through the corridors, not as the crow flies: what
+    // matters is how far the player actually has to drive.
+    std::vector<int> dist(MAP_W * MAP_H, -1);
+    std::vector<std::pair<int,int>> queue{{d.playerSpawn.tx, d.playerSpawn.ty}};
+    dist[d.playerSpawn.ty * MAP_W + d.playerSpawn.tx] = 0;
+    for (size_t head = 0; head < queue.size(); ++head) {
+        auto [x, y] = queue[head];
+        const int dx[4] = {1,-1,0,0}, dy[4] = {0,0,1,-1};
+        for (int i = 0; i < 4; ++i) {
+            const int nx = x + dx[i], ny = y + dy[i];
+            if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+            if (dist[ny * MAP_W + nx] >= 0 || !d.map.isRoad(nx, ny)) continue;
+            dist[ny * MAP_W + nx] = dist[y * MAP_W + x] + 1;
+            queue.push_back({nx, ny});
+        }
+    }
+
+    for (uint32_t seed = 1; seed <= 15; ++seed)
+        for (const auto& f : FlagPlacer::place(req, seed * 104729u))
+            CHECK(dist[f.ty * MAP_W + f.tx] >= FlagPlacer::MIN_FROM_SPAWN);
+}
+
+TEST(shuffled_flags_are_spread_across_the_maze) {
+    LevelData d = shippedLevel();
+    const auto flags = FlagPlacer::place(requestFor(d), 999);
+    int tight = 0;
+    for (size_t i = 0; i < flags.size(); ++i)
+        for (size_t j = i + 1; j < flags.size(); ++j)
+            if (manhattan(flags[i], flags[j]) < FlagPlacer::MIN_SEPARATION) ++tight;
+    // A 32x32 maze comfortably holds twelve flags at the ideal spacing.
+    CHECK_EQ(tight, 0);
+}
+
+TEST(the_same_seed_always_gives_the_same_layout) {
+    LevelData d = shippedLevel();
+    const auto req = requestFor(d);
+    const auto a = FlagPlacer::place(req, 777);
+    const auto b = FlagPlacer::place(req, 777);
+    CHECK_EQ(static_cast<int>(a.size()), static_cast<int>(b.size()));
+    for (size_t i = 0; i < a.size(); ++i) {
+        CHECK_EQ(a[i].tx, b[i].tx);
+        CHECK_EQ(a[i].ty, b[i].ty);
+        CHECK_EQ(a[i].kind, b[i].kind);
+    }
+}
+
+TEST(different_seeds_give_different_layouts) {
+    LevelData d = shippedLevel();
+    const auto req = requestFor(d);
+    const auto a = FlagPlacer::place(req, 1);
+    int same = 0;
+    for (uint32_t seed = 2; seed <= 20; ++seed) {
+        const auto b = FlagPlacer::place(req, seed);
+        bool identical = a.size() == b.size();
+        for (size_t i = 0; identical && i < a.size(); ++i)
+            identical = (a[i].tx == b[i].tx && a[i].ty == b[i].ty);
+        if (identical) ++same;
+    }
+    CHECK_EQ(same, 0);      // nineteen other seeds, nineteen other layouts
+}
+
+TEST(a_tight_maze_still_gets_its_flags_by_relaxing_the_spacing) {
+    // A single corridor cannot hold twelve well-separated flags; the placer
+    // must give ground on spacing rather than return a short round.
+    LevelData d;
+    CHECK(LevelLoader::loadFromString(
+        "name TIGHT\ntype NORMAL\nfuel 100\nmaze\n"
+        "################\n"
+        "#P.............#\n"
+        "################\n", d));
+
+    FlagPlacer::Request req;
+    req.map = &d.map;
+    req.playerSpawn = d.playerSpawn;
+    req.normal = 6;
+    const auto flags = FlagPlacer::place(req, 31337);
+    CHECK_EQ(static_cast<int>(flags.size()), 6);
+    for (const auto& f : flags) CHECK(d.map.isRoad(f.tx, f.ty));
+}

@@ -52,9 +52,10 @@ std::string findDataDir(const std::string& preferred) {
 } // namespace
 
 bool Game::init(int scale, const std::string& dataDir, int startRound,
-                bool fullscreen, bool touchUi, TouchScheme scheme) {
+                bool fullscreen, bool touchUi, TouchScheme scheme, uint32_t seed) {
     dataDir_ = findDataDir(dataDir);
     startRound_ = std::max(1, startRound);
+    gameSeed_ = seed ? seed : static_cast<uint32_t>(SDL_GetPerformanceCounter());
     levelCount_ = 0;
     for (int i = 1; i <= 99; ++i) {
         char buf[64];
@@ -108,6 +109,14 @@ std::string Game::levelPath(int roundNumber) const {
     char buf[64];
     std::snprintf(buf, sizeof buf, "%s/level%02d.lvl", dataDir_.c_str(), idx);
     return buf;
+}
+
+uint32_t Game::flagSeedFor(int roundNumber) const {
+    // Mix the game seed with the round so every round of every game differs,
+    // while a given --seed still replays exactly.
+    uint32_t s = gameSeed_ ^ (static_cast<uint32_t>(roundNumber) * 2654435761u);
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    return s ? s : 1u;
 }
 
 void Game::startNewGame() {
@@ -167,7 +176,7 @@ void Game::loadRound(int roundNumber) {
     // The pursuit must never out-run the player, or a round becomes unwinnable.
     data.enemySpeed  = std::min(data.enemySpeed, data.playerSpeed - 0.05f);
 
-    round_.load(data);
+    round_.load(data, flagSeedFor(roundNumber));
     score_.newRound();
     theme_ = themeFor(roundNumber);
 }

@@ -20,7 +20,10 @@ endif()
 
 add_subdirectory("${SDL_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/SDL2")
 
-file(GLOB_RECURSE GAME_SOURCES "${REPO_ROOT}/src/*.cpp")
+# CONFIGURE_DEPENDS re-runs the glob when a source file is added or removed.
+# Without it CMake caches the file list, and a new .cpp silently fails to link
+# on Android while the desktop Makefile (which globs every run) builds fine.
+file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "${REPO_ROOT}/src/*.cpp")
 
 # SDLActivity loads "SDL2" then "main", so the game library must be libmain.so.
 add_library(main SHARED ${GAME_SOURCES})

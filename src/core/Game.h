@@ -25,7 +25,7 @@ class Game {
 public:
     bool init(int scale, const std::string& dataDir, int startRound = 1,
               bool fullscreen = false, bool touchUi = false,
-              TouchScheme scheme = TouchScheme::Swipe);
+              TouchScheme scheme = TouchScheme::Swipe, uint32_t seed = 0);
     void run();
     // Dev tool: runs a scripted demo with no player at the keyboard and dumps
     // BMP frames, so rendering and gameplay can be checked without a display.
@@ -100,6 +100,11 @@ private:
     std::string dataDir_ = "levels";
     int  levelCount_ = 0;
     int  startRound_ = 1;   // dev option: jump straight to a later round
+
+    // Drives the per-round flag shuffle.  Fixed with --seed for a repeatable
+    // game; otherwise it comes from the clock, so no two games lay out alike.
+    uint32_t gameSeed_ = 0;
+    uint32_t flagSeedFor(int roundNumber) const;
 };
 
 } // namespace rx

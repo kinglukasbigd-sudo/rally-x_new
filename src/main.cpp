@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     std::string capture;
     int captureFrames = 900, captureEvery = 150;
     int startRound = 1;
+    unsigned int seed = 0;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--scale") == 0 && i + 1 < argc)      scale = std::atoi(argv[++i]);
@@ -34,6 +35,8 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--windowed") == 0) fullscreen = false;
         else if (std::strcmp(argv[i], "--fullscreen") == 0) fullscreen = true;
         else if (std::strcmp(argv[i], "--round") == 0 && i + 1 < argc) startRound = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
+            seed = static_cast<unsigned int>(std::strtoul(argv[++i], nullptr, 10));
         else if (std::strcmp(argv[i], "--capture") == 0 && i + 1 < argc) capture = argv[++i];
         else if (std::strcmp(argv[i], "--capture-frames") == 0 && i + 1 < argc) captureFrames = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--capture-every") == 0 && i + 1 < argc) captureEvery = std::atoi(argv[++i]);
@@ -47,6 +50,7 @@ int main(int argc, char** argv) {
                         "  --windowed    run in a window instead of fullscreen\n"
                         "  --fullscreen  start fullscreen (the default)\n"
                         "  --round N   dev only: start at round N\n"
+                        "  --seed N    fix the flag shuffle, for a repeatable game\n"
                         "  --capture DIR  dev only: run a scripted demo and dump BMP frames\n");
             return 0;
         }
@@ -54,7 +58,7 @@ int main(int argc, char** argv) {
     if (scale < 1) scale = 1;
 
     rx::Game game;
-    if (!game.init(scale, dataDir, startRound, fullscreen, touchUi, scheme)) return 1;
+    if (!game.init(scale, dataDir, startRound, fullscreen, touchUi, scheme, seed)) return 1;
     if (!capture.empty()) game.runCapture(capture, captureFrames, captureEvery);
     else                  game.run();
     game.shutdown();

@@ -10,6 +10,7 @@
 #include "gameplay/SmokeSystem.h"
 #include "ai/NavigationGraph.h"
 #include "ai/EnemyAI.h"
+#include "gameplay/FlagPlacer.h"
 #include <vector>
 
 namespace rx {
@@ -36,10 +37,14 @@ public:
         bool       smokePuffed   = false;
     };
 
-    void load(const LevelData& level);
+    // `flagSeed` of 0 keeps the flag positions authored in the level file;
+    // any other value reshuffles them.  Each new round gets a fresh seed, so
+    // the same maze never plays the same way twice.
+    void load(const LevelData& level, uint32_t flagSeed = 0);
 
-    // A fresh round: the maze, the flags, everything back to the start.
+    // A fresh round: the maze, everything back to the start, flags re-placed.
     void restart();
+    void restart(uint32_t flagSeed);
 
     // A fresh car in the middle of a round.  The flags already collected stay
     // collected -- losing a life costs the life, not the round's progress.
@@ -85,6 +90,7 @@ private:
     void spawnEnemies();
     void buildEnemyMap();
     void resetActors();
+    void placeFlags();
     Vec2 smokeEmitPoint() const;
 
     LevelData         level_;
@@ -99,7 +105,8 @@ private:
     FuelSystem        fuel_;
     Camera            camera_;
 
-    bool enemiesFrozen_ = false;
+    bool     enemiesFrozen_ = false;
+    uint32_t flagSeed_      = 0;
 
     int required_  = FLAGS_PER_ROUND;
     int collected_ = 0;
