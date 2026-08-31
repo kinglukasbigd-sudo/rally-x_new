@@ -53,6 +53,14 @@ public:
     bool musicPlaying() const { return musicPlaying_; }
     MusicTrack currentTrack() const { return current_; }
 
+    // Silence the music without stopping it.  The loop keeps running
+    // underneath, so unmuting drops back in where the track would have been
+    // rather than restarting it, and the sound effects are untouched either
+    // way -- this is a music mute, not a mute button for the whole game.
+    void setMusicMuted(bool muted);
+    bool toggleMusicMute();                       // returns the new state
+    bool musicMuted() const { return musicMuted_; }
+
     void setEnabled(bool on) { enabled_ = on; }
     bool enabled() const { return enabled_ && ready_; }
 
@@ -90,6 +98,7 @@ private:
     MusicTrack current_      = MusicTrack::Normal;
     size_t     musicPos_     = 0;
     bool       musicPlaying_ = false;
+    bool       musicMuted_   = false;
 };
 
 } // namespace rx

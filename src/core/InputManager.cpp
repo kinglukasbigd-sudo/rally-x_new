@@ -43,6 +43,7 @@ void InputManager::handleEvent(const SDL_Event& e) {
         case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_1:
                                                       setFromExternal(Action::Start, state); break;
         case SDL_SCANCODE_P:     setFromExternal(Action::Pause, state); break;
+        case SDL_SCANCODE_M:     setFromExternal(Action::MuteMusic, state); break;
         case SDL_SCANCODE_ESCAPE:setFromExternal(Action::Quit,  state); break;
         case SDL_SCANCODE_F12:   setFromExternal(Action::Debug, state); break;
         default: break;

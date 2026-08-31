@@ -137,6 +137,7 @@ touches by default, which makes a phone deliver every gesture twice.
 | Enter / 1 | Start |
 | P | Pause flag (reserved) |
 | Esc | Quit |
+| M | Mute / unmute the music |
 | F12 | Toggle the debug overlay |
 
 Debug toggles, available once the overlay is on: `F1` collision boxes, `F2` navigation
@@ -239,6 +240,16 @@ The loop is plain 22050 Hz mono 16-bit PCM -- the exact format the audio device 
 runs at, so nothing is resampled at run time -- and it is mixed in at
 `AudioManager::MUSIC_GAIN` (0.15), which puts it comfortably under the effects. Change that
 one constant to make it louder or quieter.
+
+### Muting
+
+`M` toggles the music on and off, and on a touch device there is a `[ MUSIC: ON ]` toggle on
+the title screen next to the controls one. It silences the music only -- the sound effects
+carry on, so you can still hear a flag or a crash.
+
+The loop keeps running underneath while muted, so unmuting rejoins the track where it would
+have been rather than restarting it. The setting lasts for the session; it is not written to
+disk, so the game starts unmuted.
 
 ### Using your own music
 

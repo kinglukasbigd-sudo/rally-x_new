@@ -66,7 +66,9 @@ void AudioManager::mix(int16_t* out, int frames) {
 
         const std::vector<int16_t>& music = tracks_[static_cast<size_t>(current_)];
         if (musicPlaying_ && !music.empty()) {
-            sample += static_cast<int>(music[musicPos_] * MUSIC_GAIN);
+            // Muting drops the music out of the mix but keeps the playhead
+            // moving, so unmuting rejoins the track instead of restarting it.
+            if (!musicMuted_) sample += static_cast<int>(music[musicPos_] * MUSIC_GAIN);
             if (++musicPos_ >= music.size()) musicPos_ = 0;    // seamless loop
         }
 
@@ -264,6 +266,19 @@ void AudioManager::startMusic(MusicTrack track) {
     musicPos_     = 0;
     musicPlaying_ = true;
     SDL_UnlockAudioDevice(device_);
+}
+
+void AudioManager::setMusicMuted(bool muted) {
+    if (musicMuted_ == muted) return;
+    if (ready_) SDL_LockAudioDevice(device_);
+    musicMuted_ = muted;
+    if (ready_) SDL_UnlockAudioDevice(device_);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "music %s", muted ? "muted" : "unmuted");
+}
+
+bool AudioManager::toggleMusicMute() {
+    setMusicMuted(!musicMuted_);
+    return musicMuted_;
 }
 
 void AudioManager::stopMusic() {

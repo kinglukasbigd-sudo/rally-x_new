@@ -95,6 +95,8 @@ private:
     float     lowFuelTimer_ = 0.f;
     int       lastLives_  = START_LIVES;
     Rect      schemeToggleRect_{};
+    Rect      musicToggleRect_{};
+    float     muteNoticeTimer_ = 0.f;
     bool      hasTouchDevice_ = false;
 
     std::string dataDir_ = "levels";

@@ -15,10 +15,10 @@ constexpr float READY_SECONDS          = 2.0f;
 constexpr float ROUND_COMPLETE_SECONDS = 2.5f;
 constexpr float DEATH_SECONDS          = 2.0f;
 // Title-screen control-scheme toggle, in framebuffer pixels.
-constexpr int   TOGGLE_TEXT_Y          = 178;
+constexpr int   TOGGLE_TEXT_Y          = 170;
+constexpr int   MUSIC_TEXT_Y           = 188;
 constexpr int   TOGGLE_BOX_X           = 82;
 constexpr int   TOGGLE_BOX_W           = 124;
-constexpr int   TOGGLE_BOX_Y           = TOGGLE_TEXT_Y - 5;
 constexpr int   TOGGLE_BOX_H           = 18;
 constexpr float GAME_OVER_SECONDS      = 3.0f;
 
@@ -308,6 +308,13 @@ void Game::runCapture(const std::string& outDir, int frames, int everyN) {
                 round_.flagsCollected(), round_.flagsRequired());
 }
 
+namespace {
+// Is a tap inside one of the title screen's toggles?
+bool hitToggle(const rx::Rect& r, float x, float y) {
+    return r.w > 0.f && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+} // namespace
+
 void Game::handleEvents() {
     input_.beginFrame();
 
@@ -329,14 +336,16 @@ void Game::handleEvents() {
                 case SDL_FINGERMOTION: {
                     const float x = e.tfinger.x * winW, y = e.tfinger.y * winH;
                     if (e.type == SDL_FINGERDOWN) {
-                        if (state_ == GameState::StartScreen &&
-                            schemeToggleRect_.w > 0.f &&
-                            x >= schemeToggleRect_.x && x < schemeToggleRect_.x + schemeToggleRect_.w &&
-                            y >= schemeToggleRect_.y && y < schemeToggleRect_.y + schemeToggleRect_.h) {
+                        if (state_ == GameState::StartScreen && hitToggle(schemeToggleRect_, x, y)) {
                             touch_.setScheme(touch_.scheme() == TouchScheme::Swipe
                                              ? TouchScheme::Pad : TouchScheme::Swipe);
                             audio_.play(Sfx::Flag);
                             break;                       // not a start tap
+                        }
+                        if (state_ == GameState::StartScreen && hitToggle(musicToggleRect_, x, y)) {
+                            audio_.toggleMusicMute();
+                            audio_.play(Sfx::Flag);
+                            break;
                         }
                         touch_.fingerDown(e.tfinger.fingerId, x, y);
                     } else {
@@ -353,11 +362,14 @@ void Game::handleEvents() {
                 case SDL_MOUSEBUTTONDOWN: {
                     if (hasTouchDevice_) break;
                     const float x = static_cast<float>(e.button.x), y = static_cast<float>(e.button.y);
-                    if (state_ == GameState::StartScreen && schemeToggleRect_.w > 0.f &&
-                        x >= schemeToggleRect_.x && x < schemeToggleRect_.x + schemeToggleRect_.w &&
-                        y >= schemeToggleRect_.y && y < schemeToggleRect_.y + schemeToggleRect_.h) {
+                    if (state_ == GameState::StartScreen && hitToggle(schemeToggleRect_, x, y)) {
                         touch_.setScheme(touch_.scheme() == TouchScheme::Swipe
                                          ? TouchScheme::Pad : TouchScheme::Swipe);
+                        audio_.play(Sfx::Flag);
+                        break;
+                    }
+                    if (state_ == GameState::StartScreen && hitToggle(musicToggleRect_, x, y)) {
+                        audio_.toggleMusicMute();
                         audio_.play(Sfx::Flag);
                         break;
                     }
@@ -418,6 +430,15 @@ void Game::fixedUpdate(float dt) {
     ++tick_;
     stateTimer_ += dt;
     touch_.update(dt);
+    muteNoticeTimer_ = std::max(0.f, muteNoticeTimer_ - dt);
+
+    // Mute is a player action rather than a debug key, so it lives with the
+    // rest of them and works in every state -- including the title screen and
+    // the between-round cards.
+    if (input_.pressed(Action::MuteMusic)) {
+        audio_.toggleMusicMute();
+        muteNoticeTimer_ = 1.6f;      // say so on screen, briefly
+    }
 
     switch (state_) {
         case GameState::StartScreen:
@@ -537,6 +558,13 @@ void Game::render() {
         radar_.draw(renderer_, round_, tick_, debug_.radarDebug, theme_);
 
         renderOverlayText();
+
+        // Toggling music mid-round is invisible otherwise: you cannot tell a
+        // mute from a track that simply has a quiet passage.
+        if (muteNoticeTimer_ > 0.f)
+            renderer_.textCentered(VIEW_X + VIEW_W / 2, VIEW_Y + 6,
+                                   audio_.musicMuted() ? "MUSIC OFF" : "MUSIC ON",
+                                   pal::Accent);
     }
 
     if (debug_.enabled) renderDebug();
@@ -551,10 +579,13 @@ void Game::render() {
         if (state_ == GameState::StartScreen) {
             const Rect g = renderer_.gameRect();
             const float sx = g.w / SCREEN_W, sy = g.h / SCREEN_H;
-            schemeToggleRect_ = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + TOGGLE_BOX_Y * sy,
+            schemeToggleRect_ = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (TOGGLE_TEXT_Y - 5) * sy,
+                                      TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
+            musicToggleRect_  = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (MUSIC_TEXT_Y - 5) * sy,
                                       TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
         } else {
             schemeToggleRect_ = Rect{};
+            musicToggleRect_  = Rect{};
         }
     }
     renderer_.endPresent();
@@ -672,26 +703,33 @@ void Game::renderStartScreen() {
     sprites_.drawCarAtScreen(renderer_, lead - 58, lane, Direction::Right, frame ^ 1, true, 4);
 
     if ((tick_ / 30) % 2 == 0)
-        renderer_.textCentered(cx, 146, "PRESS START", pal::Text);
+        renderer_.textCentered(cx, 142, "PRESS START", pal::Text);
+
+    const bool muted = audio_.musicMuted();
 
     if (touch_.enabled()) {
         const bool swipe = (touch_.scheme() == TouchScheme::Swipe);
-        renderer_.textCentered(cx, 158, "TAP TO START", pal::TextDim);
+        renderer_.textCentered(cx, 154, "TAP TO START", pal::TextDim);
 
-        // The scheme toggle sits mid-screen on purpose: the bottom edge of a
-        // phone belongs to the system's navigation gestures, and a control
-        // parked there simply never gets the touch.
+        // Both toggles sit mid-screen on purpose: the bottom edge of a phone
+        // belongs to the system's navigation gestures, and a control parked
+        // there simply never gets the touch.
         renderer_.textCentered(cx, TOGGLE_TEXT_Y, swipe ? "[ CONTROLS: SWIPE ]"
                                                         : "[ CONTROLS: PAD ]", pal::Accent);
+        renderer_.textCentered(cx, MUSIC_TEXT_Y, muted ? "[ MUSIC: OFF ]"
+                                                       : "[ MUSIC: ON ]",
+                               muted ? pal::TextDim : pal::Accent);
 
-        renderer_.textCentered(cx, 200, swipe ? "SWIPE TO DRIVE" : "PAD TO DRIVE", pal::TextDim);
-        renderer_.textCentered(cx, 210, swipe ? "TAP FOR SMOKE"
+        renderer_.textCentered(cx, 206, swipe ? "SWIPE TO DRIVE" : "PAD TO DRIVE", pal::TextDim);
+        renderer_.textCentered(cx, 216, swipe ? "TAP FOR SMOKE"
                                               : "BUTTON FOR SMOKE", pal::TextDim);
     } else {
-        renderer_.textCentered(cx, 164, "ENTER OR SPACE", pal::TextDim);
-        renderer_.textCentered(cx, 188, "ARROWS DRIVE   SPACE SMOKE", pal::TextDim);
-        renderer_.textCentered(cx, 202, "COLLECT 10 FLAGS PER ROUND", pal::TextDim);
-        renderer_.textCentered(cx, 214, "CLEAN-ROOM RECONSTRUCTION", pal::TextDim);
+        renderer_.textCentered(cx, 154, "ENTER OR SPACE", pal::TextDim);
+        renderer_.textCentered(cx, MUSIC_TEXT_Y, muted ? "[ MUSIC: OFF ]"
+                                                       : "[ MUSIC: ON ]",
+                               muted ? pal::TextDim : pal::Accent);
+        renderer_.textCentered(cx, 206, "ARROWS DRIVE   SPACE SMOKE", pal::TextDim);
+        renderer_.textCentered(cx, 216, "M MUTES MUSIC", pal::TextDim);
     }
 
     if (score_.highScore() > 0) {

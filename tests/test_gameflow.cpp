@@ -3,6 +3,7 @@
 #include "gameplay/ChallengeStage.h"
 #include "gameplay/Round.h"
 #include "gameplay/SmokeSystem.h"
+#include "audio/AudioManager.h"
 #include "gameplay/ScoreSystem.h"
 #include "core/InputManager.h"
 #include "world/LevelLoader.h"
@@ -504,4 +505,82 @@ TEST(a_fixed_seed_replays_the_same_layout) {
     const auto c = layoutWithSeed(11111111u);
     CHECK(a == b);        // --seed makes a game repeatable
     CHECK(a != c);        // a different seed lays out differently
+}
+
+// ---------------------------------------------------------------------------
+// Music mute.
+// ---------------------------------------------------------------------------
+
+TEST(music_starts_unmuted_and_toggles) {
+    HeadlessGame h; CHECK(h.ok);
+    CHECK(!h.g.audio().musicMuted());
+}
+
+TEST(the_mute_toggle_flips_and_reports_the_new_state) {
+    AudioManager a;
+    CHECK(!a.musicMuted());
+    CHECK(a.toggleMusicMute());        // returns the state it moved to
+    CHECK(a.musicMuted());
+    CHECK(!a.toggleMusicMute());
+    CHECK(!a.musicMuted());
+}
+
+TEST(setting_the_same_mute_state_twice_is_harmless) {
+    AudioManager a;
+    a.setMusicMuted(true);
+    a.setMusicMuted(true);
+    CHECK(a.musicMuted());
+    a.setMusicMuted(false);
+    a.setMusicMuted(false);
+    CHECK(!a.musicMuted());
+}
+
+TEST(muting_does_not_stop_the_music_playing_underneath) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+    CHECK(h.g.audio().musicPlaying());
+
+    h.press(Action::MuteMusic);
+    CHECK(h.g.audio().musicMuted());
+    // Still "playing", just silent: unmuting rejoins rather than restarts.
+    CHECK(h.g.audio().musicPlaying());
+
+    h.press(Action::MuteMusic);
+    CHECK(!h.g.audio().musicMuted());
+    CHECK(h.g.audio().musicPlaying());
+}
+
+TEST(mute_survives_the_switch_between_round_kinds) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    h.press(Action::MuteMusic);
+    CHECK(h.g.audio().musicMuted());
+
+    // Through a normal round, a challenging stage, and out the other side.
+    for (int round = 1; round <= 3; ++round) {
+        const bool challenge = h.g.round().isChallenge();
+        CHECK(h.waitFor(challenge ? GameState::ChallengingStage : GameState::Playing, 60 * 10));
+        CHECK(h.g.audio().musicMuted());       // never quietly turns itself back on
+        h.g.debugCollectAllFlags();
+        h.run(1);
+        CHECK(h.waitFor(GameState::Ready, 60 * 5));
+    }
+    CHECK(h.waitFor(GameState::Playing, 60 * 5));
+    CHECK(h.g.audio().musicMuted());
+    CHECK(h.g.audio().currentTrack() == MusicTrack::Normal);
+}
+
+TEST(mute_survives_losing_a_life_and_a_new_game) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+    h.press(Action::MuteMusic);
+
+    CHECK(h.waitFor(GameState::PlayerDeath, 60 * 90));
+    CHECK(h.g.audio().musicMuted());
+    CHECK(h.waitFor(GameState::Ready, 60 * 5));
+    CHECK(h.g.audio().musicMuted());
 }
