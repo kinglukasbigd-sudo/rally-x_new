@@ -18,3 +18,7 @@ android/local.properties
 # Python bytecode from the tools
 __pycache__/
 *.pyc
+
+# Player-supplied music. Whatever anyone drops in here is theirs, and must
+# never be committed or shipped in the APK.
+music/

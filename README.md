@@ -240,6 +240,41 @@ runs at, so nothing is resampled at run time -- and it is mixed in at
 `AudioManager::MUSIC_GAIN` (0.15), which puts it comfortably under the effects. Change that
 one constant to make it louder or quieter.
 
+### Using your own music
+
+The game checks for your own tracks before the bundled ones, and plays them if they are
+there. Nothing you put in that folder is part of this project: it is never committed, never
+packed into the APK, and never published.
+
+| Platform | Put `music_normal.wav` / `music_challenge.wav` here |
+| --- | --- |
+| Linux | `~/.local/share/newrallyx/music/` (or `$XDG_DATA_HOME/newrallyx/music/`) |
+| Android | `Android/data/com.cleanroom.newrallyx/files/music/` |
+| Either | a `music/` folder beside the game |
+
+The game creates that folder on first run and logs the exact path, along with every path it
+searched — which is the first thing you want to see when a track is not picked up. **Let the
+game create the folder.** On Android a directory made from outside the app (`adb shell
+mkdir`, a script) is owned by whoever made it, and the app is then denied access to its own
+folder.
+
+Files must be WAV. Build them from anything with the tools below, which write straight into
+that folder:
+
+```bash
+tools/find_loop.py song.mp3 ~/.local/share/newrallyx/music/music_normal.wav --from=0 --to=50
+```
+
+```bash
+adb push ~/.local/share/newrallyx/music/music_normal.wav /sdcard/Android/data/com.cleanroom.newrallyx/files/music/
+```
+
+Only use music you have the rights to. The clean-room statement covers this project's own
+code and art; it says nothing about what you drop into your music folder, and neither does
+the licence on the repository.
+
+### Building a loop
+
 There are two tools for building a loop; both need `ffmpeg` on the path (or
 `FFMPEG=/path/to/ffmpeg`).
 
@@ -248,6 +283,9 @@ There are two tools for building a loop; both need `ffmpeg` on the path (or
 ```bash
 tools/find_loop.py <input.mp3> assets/audio/music_normal.wav --min=12 --max=28
 ```
+
+`--from=S --to=S` slices a region out first, so one file holding two pieces of music can be
+cut into two separate loops.
 
 It estimates the tempo *and* the downbeat, restricts the loop to a whole number of bars so
 the rhythm never stutters across the join, scores candidates on spectral continuity and

@@ -17,6 +17,10 @@ thing:
     which removes the click without smearing the music
 
     tools/find_loop.py <input> <output.wav> [--min=S] [--max=S]
+                       [--from=S] [--to=S]
+
+--from/--to slice a region out of the source first, so one file holding two
+pieces of music can be cut into two separate loops.
 """
 import os, subprocess, sys, tempfile, wave
 import numpy as np
@@ -218,6 +222,16 @@ def main():
 
     x = decode(src)
     print("source      : %.2fs" % (len(x) / RATE))
+
+    # Optional slice, for a file that holds more than one piece of music.
+    a = float(opts.get("--from", 0.0))
+    b = float(opts.get("--to", 0.0))
+    if a > 0.0 or b > 0.0:
+        lo = int(a * RATE)
+        hi = int(b * RATE) if b > 0.0 else len(x)
+        x = x[lo:hi]
+        print("slice       : %.2fs -> %s  (%.2fs)"
+              % (a, ("%.2fs" % b) if b > 0 else "end", len(x) / RATE))
 
     env  = onset_envelope(x)
     beat = estimate_beat(env)

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <sys/stat.h>
 
 namespace rx {
 
@@ -23,9 +24,58 @@ constexpr float GAME_OVER_SECONDS      = 3.0f;
 
 bool fileExists(const std::string& p) { return FileSystem::exists(p); }
 
-// The looping background tracks.  Inside an APK the assets live at the root,
-// so the bare "audio/..." path is the one that resolves there.
+// Create the folder if it is not there yet.  This matters on Android: a
+// directory made from outside the app (adb, a script) is owned by whoever made
+// it and the app is then denied access to its own folder.  Made by the app, it
+// belongs to the app, and anything dropped in afterwards can be read.
+void ensureDir(const std::string& path) {
+    std::string p = path;
+    while (!p.empty() && p.back() == '/') p.pop_back();
+    if (p.empty()) return;
+    ::mkdir(p.c_str(), 0777);
+}
+
+// Where the player can drop their own music, checked before the bundled
+// tracks.  Anything here belongs to whoever put it there: it is never part of
+// the project, never shipped in the APK, and never committed.
+std::vector<std::string> userMusicDirs() {
+    std::vector<std::string> dirs;
+
+#if defined(__ANDROID__)
+    // The app's own external folder, reachable over USB or a file manager at
+    //   Android/data/com.cleanroom.newrallyx/files/music/
+    if (const char* ext = SDL_AndroidGetExternalStoragePath())
+        dirs.push_back(std::string(ext) + "/music/");
+#else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"))
+        dirs.push_back(std::string(xdg) + "/newrallyx/music/");
+    if (const char* home = std::getenv("HOME"))
+        dirs.push_back(std::string(home) + "/.local/share/newrallyx/music/");
+#endif
+    dirs.push_back("music/");          // or just a folder next to the game
+    return dirs;
+}
+
+// The one the player is told about, and the one the game creates for them.
+std::string primaryMusicDir() {
+    const auto dirs = userMusicDirs();
+    return dirs.empty() ? std::string("music/") : dirs.front();
+}
+
+// The looping background tracks.  A user-supplied file always wins; otherwise
+// the bundled loop is used.  Inside an APK the assets live at the root, so the
+// bare "audio/..." path is the one that resolves there.
 std::string findAudio(const std::string& name) {
+    for (const std::string& dir : userMusicDirs()) {
+        const std::string path = dir + name;
+        const bool found = fileExists(path);
+        // Logged either way: when someone's own track is not picked up, the
+        // first question is always which paths were actually looked at.
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "music search: %s%s",
+                    path.c_str(), found ? "  <= using this" : "  (not found)");
+        if (found) return path;
+    }
+
     const std::string candidates[] = {
         "audio/" + name,
         "assets/audio/" + name,
@@ -79,6 +129,13 @@ bool Game::init(int scale, const std::string& dataDir, int startRound,
     renderer_.setFillScreen(fullscreen);
     sprites_.create(renderer_);
     audio_.init();          // silence is an acceptable outcome, not an error
+    // Make the folder before looking in it, and say where it is: "drop a wav
+    // here" is useless advice without the path.
+    ensureDir(primaryMusicDir());
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "your own music goes in: %s  (music_normal.wav, music_challenge.wav)",
+                primaryMusicDir().c_str());
+
     struct TrackFile { MusicTrack track; const char* file; };
     for (const TrackFile& t : { TrackFile{ MusicTrack::Normal,    "music_normal.wav" },
                                 TrackFile{ MusicTrack::Challenge, "music_challenge.wav" } }) {
