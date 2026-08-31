@@ -405,6 +405,7 @@ void Game::fixedUpdate(float dt) {
             playRoundSounds(ev);
             updateLowFuelWarning(dt);
             if (lives_.checkBonusLife(score_.score())) audio_.play(Sfx::ExtraLife);
+            if (ev.chaseStarted) audio_.play(Sfx::ChaseAlarm);
 
             const auto out = challenge_.update(round_, ev.playerDied, ev.roundComplete, score_);
             if (out.finished) {
@@ -661,7 +662,10 @@ void Game::renderWorld() {
             sprites_.drawSmoke(renderer_, cam, c.pos, c.lifeFraction());
 
     for (const auto& e : round_.enemies()) {
-        if (!e.onTrack() || e.state() == EnemyState::Spawning) continue;
+        // Cars waiting to launch are drawn too: the player should see the pack
+        // sitting in the pen, and in a challenging stage should see them
+        // arrive rather than have them appear already moving.
+        if (!e.onTrack()) continue;
         if (!cam.visible(e.position().x, e.position().y)) continue;
         sprites_.drawEnemy(renderer_, cam, e.position(), e.direction(),
                            e.animationFrame(), e.stunned(),
@@ -766,6 +770,13 @@ void Game::renderOverlayText() {
                 renderer_.textCentered(cx, VIEW_Y + VIEW_H / 2 + 8,
                                        "LUCKY BONUS " + std::to_string(luckyBonusShown_),
                                        pal::FlagLucky);
+            break;
+
+        case GameState::ChallengingStage:
+            if (round_.chaseActive() && (tick_ / 12) % 2 == 0) {
+                banner(-8, 12);
+                renderer_.textCentered(cx, VIEW_Y + VIEW_H / 2 - 4, "OUT OF FUEL", pal::Danger);
+            }
             break;
 
         case GameState::PlayerDeath: {

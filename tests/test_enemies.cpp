@@ -477,3 +477,189 @@ TEST(a_challenging_stage_puts_no_enemies_on_the_track) {
         ev = r.update(in, s, static_cast<float>(FIXED_DT));
     CHECK(ev.cause != DeathCause::Enemy);
 }
+
+// ---------------------------------------------------------------------------
+// Challenging stage: the fuel gauge is a countdown to being hunted.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+LevelData challengeLevel() {
+    LevelData d;
+    CHECK(LevelLoader::loadFromFile("levels/level03.lvl", d));
+    CHECK(d.type == RoundType::Challenge);
+    return d;
+}
+
+} // namespace
+
+TEST(a_challenging_stage_drives_a_faster_car) {
+    for (int n : { 3, 7, 11 }) {
+        char path[64];
+        std::snprintf(path, sizeof path, "levels/level%02d.lvl", n);
+        LevelData c;
+        CHECK(LevelLoader::loadFromFile(path, c));
+        CHECK(c.type == RoundType::Challenge);
+
+        LevelData normal;
+        CHECK(LevelLoader::loadFromFile("levels/level01.lvl", normal));
+        CHECK(c.playerSpeed > normal.playerSpeed);
+    }
+}
+
+TEST(the_chase_cars_wait_in_the_pen_until_the_tank_is_dry) {
+    LevelData d = challengeLevel();
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    // The track starts clear even though the level lists cars.
+    CHECK(d.enemyCount > 0);
+    CHECK_EQ(static_cast<int>(r.enemies().size()), 0);
+    CHECK(!r.chaseActive());
+
+    InputManager in;
+    for (int i = 0; i < 60 * 5; ++i) r.update(in, s, static_cast<float>(FIXED_DT));
+    CHECK_EQ(static_cast<int>(r.enemies().size()), 0);   // still clear with fuel left
+    CHECK(!r.chaseActive());
+}
+
+TEST(running_dry_in_a_challenging_stage_releases_the_cars) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f;                       // straight to the interesting part
+    d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    Round::Events ev;
+    for (int i = 0; i < 120 && !ev.chaseStarted; ++i)
+        ev = r.update(in, s, static_cast<float>(FIXED_DT));
+
+    CHECK(ev.chaseStarted);
+    CHECK(r.chaseActive());
+    CHECK(!ev.playerDied);                          // dry fuel does not kill here
+    CHECK(r.player().alive());
+    CHECK_EQ(static_cast<int>(r.enemies().size()), d.enemyCount);
+}
+
+TEST(the_chase_cars_run_at_twice_the_players_speed) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    for (int i = 0; i < 120 && !r.chaseActive(); ++i)
+        r.update(in, s, static_cast<float>(FIXED_DT));
+    CHECK(r.chaseActive());
+
+    for (const auto& e : r.enemies())
+        CHECK_NEAR(e.speed(), d.playerSpeed * Round::CHASE_SPEED_MULTIPLE, 1e-4);
+    CHECK(r.enemies()[0].speed() > d.playerSpeed);
+}
+
+TEST(the_chase_launches_almost_immediately) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    for (int i = 0; i < 120 && !r.chaseActive(); ++i)
+        r.update(in, s, static_cast<float>(FIXED_DT));
+
+    // Just long enough for the alarm to register -- an ordinary round holds
+    // the pack far longer.
+    CHECK(r.launchCountdown() > 0.f);
+    CHECK(r.launchCountdown() < 1.0f);
+
+    for (int i = 0; i < 60; ++i) r.update(in, s, static_cast<float>(FIXED_DT));
+    for (const auto& e : r.enemies()) CHECK(e.state() != EnemyState::Spawning);
+}
+
+TEST(the_chase_never_kills_on_the_frame_it_is_released) {
+    // If the player happens to be standing on the pen when the tank empties,
+    // the cars must not materialise straight into them.
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    d.rocks.clear();
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    int chaseAt = -1, diedAt = -1;
+    for (int i = 0; i < 60 * 20 && diedAt < 0; ++i) {
+        const auto ev = r.update(in, s, static_cast<float>(FIXED_DT));
+        if (ev.chaseStarted) chaseAt = i;
+        if (ev.playerDied)   diedAt  = i;
+    }
+    CHECK(chaseAt >= 0);
+    if (diedAt >= 0) CHECK(diedAt - chaseAt >= 20);   // at least a third of a second
+}
+
+TEST(the_released_cars_run_the_player_down_quickly) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;     // real speeds: chase is 2x the player
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    Round::Events ev;
+    int steps = 0;
+    for (; steps < 60 * 30 && !ev.playerDied; ++steps)
+        ev = r.update(in, s, static_cast<float>(FIXED_DT));
+
+    CHECK(ev.playerDied);
+    CHECK(ev.cause == DeathCause::Enemy);
+    CHECK(steps < 60 * 20);              // caught, and not after a long wait
+}
+
+TEST(the_chase_only_starts_once) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    int started = 0;
+    for (int i = 0; i < 300; ++i) {
+        const auto ev = r.update(in, s, static_cast<float>(FIXED_DT));
+        if (ev.chaseStarted) ++started;
+        if (!r.player().alive()) break;
+    }
+    CHECK_EQ(started, 1);                // not re-spawned every empty-tank frame
+}
+
+TEST(an_ordinary_round_still_dies_when_the_tank_runs_dry) {
+    LevelData d;
+    CHECK(LevelLoader::loadFromFile("levels/level01.lvl", d));
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    Round::Events ev;
+    for (int i = 0; i < 200 && !ev.playerDied; ++i)
+        ev = r.update(in, s, static_cast<float>(FIXED_DT));
+
+    CHECK(ev.playerDied);
+    CHECK(ev.cause == DeathCause::OutOfFuel);   // unchanged outside a challenge
+    CHECK(!ev.chaseStarted);
+}
+
+TEST(restarting_a_challenging_stage_puts_the_cars_back_in_the_pen) {
+    LevelData d = challengeLevel();
+    d.fuel = 3.f; d.fuelDrain = 6.f;
+    Round r; ScoreSystem s; s.newGame();
+    r.load(d);
+
+    InputManager in;
+    for (int i = 0; i < 120 && !r.chaseActive(); ++i)
+        r.update(in, s, static_cast<float>(FIXED_DT));
+    CHECK(r.chaseActive());
+
+    r.restart();
+    CHECK(!r.chaseActive());
+    CHECK_EQ(static_cast<int>(r.enemies().size()), 0);
+    CHECK_NEAR(r.fuel().fuel(), r.fuel().capacity(), 1e-4);
+}

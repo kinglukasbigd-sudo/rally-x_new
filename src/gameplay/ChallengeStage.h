@@ -11,9 +11,13 @@ class ScoreSystem;
 // against the fuel gauge for flags.
 //
 // Behaviour reconstructed for this phase:
-//   * no enemy cars are placed (Round::spawnEnemies skips them entirely)
-//   * the stage ends when every flag is taken, or when the run ends early
-//     because the tank ran dry or the car hit a rock
+//   * the track starts clear -- the pursuit cars wait in the pen
+//   * the player's car is faster here than in an ordinary round
+//   * running the tank dry does not end the stage: it releases the cars at
+//     twice the player's speed (Round::startChallengeChase), so the fuel gauge
+//     is a countdown to being hunted rather than a countdown to the exit
+//   * the stage ends when every flag is taken, or when one of those cars
+//     catches the player, or on a rock
 //   * ending early does NOT cost a car -- a bonus stage never takes a life
 //   * clearing every flag pays a perfect bonus on top of the flag scores
 class ChallengeStage {

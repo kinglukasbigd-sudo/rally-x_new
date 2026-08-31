@@ -6,9 +6,9 @@ type CHALLENGE
 difficulty 3
 fuel 100
 fuelDrain 2.00
-playerSpeed 1.35
+playerSpeed 1.65
 enemySpeed 1.10
-enemies 0
+enemies 5
 # enemy pen: 7 tiles, 24 tiles from the player spawn
 maze
 ################################

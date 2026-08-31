@@ -16,6 +16,10 @@ constexpr float ENEMY_HIT_RADIUS   = 11.f;
 // Every car in the round waits out the same countdown and then launches at
 // the same instant -- the pack leaves the pen together, never in a trickle.
 constexpr float ENEMY_LAUNCH_DELAY = 1.4f;
+// The challenging-stage chase gets a much shorter beat -- just enough that the
+// alarm registers and the player is not killed on the very frame the cars
+// appear, which is what happens if they were standing near the pen.
+constexpr float CHASE_LAUNCH_DELAY = 0.5f;
 }
 
 void Round::load(const LevelData& level, uint32_t flagSeed) {
@@ -36,10 +40,8 @@ void Round::buildEnemyMap() {
         enemyMap_.set(rs.tx, rs.ty, Tile::Wall);
 }
 
-void Round::spawnEnemies() {
+void Round::placeCarsInPen(float speed, float delay) {
     enemies_.clear();
-    // Challenging stages run with no pursuit at all; see ChallengeStage.
-    if (isChallenge()) return;
 
     const int penSize = static_cast<int>(level_.enemyPen.size());
     if (penSize == 0) return;
@@ -64,16 +66,41 @@ void Round::spawnEnemies() {
     for (int i = 0; i < count; ++i) {
         const auto& tile = level_.enemyPen[static_cast<size_t>(i)];
         Enemy e;
-        e.spawn(Maze::tileCenterWorld(tile.tx, tile.ty), facing,
-                level_.enemySpeed, ENEMY_LAUNCH_DELAY);
+        e.spawn(Maze::tileCenterWorld(tile.tx, tile.ty), facing, speed, delay);
         enemies_.push_back(e);
     }
+}
+
+void Round::spawnEnemies() {
+    enemies_.clear();
+    chaseActive_ = false;
 
     EnemyAI::Tuning t;
     // Higher rounds route further out and wander less: the pack tightens up.
     t.pathfindRangeTiles = 10 + level_.difficulty;
     t.randomTurnChance   = std::max(0.05f, 0.20f - 0.02f * level_.difficulty);
     ai_.reset(0x9E3779B9u ^ static_cast<uint32_t>(level_.difficulty * 2654435761u), t);
+
+    // A challenging stage starts with the track clear.  Its cars are held in
+    // the pen and only released when the tank runs dry -- see
+    // startChallengeChase().
+    if (isChallenge()) return;
+
+    placeCarsInPen(level_.enemySpeed, ENEMY_LAUNCH_DELAY);
+}
+
+void Round::startChallengeChase() {
+    chaseActive_ = true;
+
+    // Twice the player's speed, out of the pen after the briefest of beats.
+    // This is not a chase to be won: it is the stage's closing bell, and the
+    // only way out is to have already taken the flags.
+    placeCarsInPen(level_.playerSpeed * CHASE_SPEED_MULTIPLE, CHASE_LAUNCH_DELAY);
+
+    EnemyAI::Tuning t;
+    t.pathfindRangeTiles = MAP_W + MAP_H;   // route properly from anywhere
+    t.randomTurnChance   = 0.02f;           // and barely wander
+    ai_.reset(0xC0FFEEu ^ static_cast<uint32_t>(level_.difficulty * 40503u), t);
 }
 
 void Round::restart() {
@@ -141,6 +168,7 @@ void Round::resetActors() {
 
     smoke_.reset();
     fuel_.reset(level_.fuel, level_.fuelDrain);   // a new car has a full tank
+    chaseActive_ = false;
     spawnEnemies();
 
     player_.spawn(Maze::tileCenterWorld(level_.playerSpawn.tx, level_.playerSpawn.ty),
@@ -182,9 +210,19 @@ Round::Events Round::update(const InputManager& input, ScoreSystem& score, float
     if (!ev.playerDied) checkEnemies(ev);
 
     if (!ev.playerDied && fuel_.empty()) {
-        player_.kill();
-        ev.playerDied = true;
-        ev.cause = DeathCause::OutOfFuel;
+        if (isChallenge()) {
+            // The tank running dry does not end a challenging stage -- it
+            // lets the cars out.  The player keeps driving (and can still
+            // finish the flags), but now with the pack on them.
+            if (!chaseActive_) {
+                startChallengeChase();
+                ev.chaseStarted = true;
+            }
+        } else {
+            player_.kill();
+            ev.playerDied = true;
+            ev.cause = DeathCause::OutOfFuel;
+        }
     }
 
     camera_.centerOn(player_.position());

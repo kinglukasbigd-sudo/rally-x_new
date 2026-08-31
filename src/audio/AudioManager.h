@@ -20,6 +20,7 @@ enum class Sfx {
     RoundClear,
     ExtraLife,
     LowFuel,
+    ChaseAlarm,    // challenging stage: the tank ran dry, the cars are out
     GameOver
 };
 

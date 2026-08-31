@@ -25,6 +25,11 @@ enum class DeathCause { None, Rock, OutOfFuel, Enemy };
 // life always restores exactly the original layout.
 class Round {
 public:
+    // In a challenging stage the pursuit cars are held back until the tank
+    // runs dry -- and then they come out at this multiple of the player's
+    // speed, which is not a chase the player is meant to win.
+    static constexpr float CHASE_SPEED_MULTIPLE = 2.0f;
+
     struct Events {
         bool       playerDied    = false;
         bool       roundComplete = false;
@@ -35,6 +40,7 @@ public:
         bool       specialTaken  = false;
         bool       luckyTaken    = false;
         bool       smokePuffed   = false;
+        bool       chaseStarted  = false;   // challenging stage: fuel ran out
     };
 
     // `flagSeed` of 0 keeps the flag positions authored in the level file;
@@ -79,6 +85,9 @@ public:
 
     bool isChallenge() const { return level_.type == RoundType::Challenge; }
 
+    // True once a challenging stage's tank has emptied and the cars are loose.
+    bool chaseActive() const { return chaseActive_; }
+
     void setInfiniteFuel(bool on) { fuel_.setInfinite(on); }
     void setEnemiesFrozen(bool on) { enemiesFrozen_ = on; }
     void debugCollectAllFlags(ScoreSystem& score);
@@ -88,6 +97,8 @@ private:
     void checkRocks(Events& ev);
     void checkEnemies(Events& ev);
     void spawnEnemies();
+    void placeCarsInPen(float speed, float delay);
+    void startChallengeChase();
     void buildEnemyMap();
     void resetActors();
     void placeFlags();
@@ -107,6 +118,7 @@ private:
 
     bool     enemiesFrozen_ = false;
     uint32_t flagSeed_      = 0;
+    bool     chaseActive_   = false;
 
     int required_  = FLAGS_PER_ROUND;
     int collected_ = 0;

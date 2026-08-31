@@ -215,19 +215,23 @@ if __name__ == '__main__':
     #   from how much you start with.  The last column is the resulting round
     #   length in seconds (100 / drain), which is the number worth balancing.
     #
+    #   Challenging stages drive a faster car, and their "cars" column is not
+    #   a pursuit that starts with the round -- it is how many come out of the
+    #   pen at double speed once the tank runs dry.
+    #
     #   seed  name       type        diff fuel drain pSpd  eSpd  cars rocks blocks  block size
     rounds = [
         (1001, "ROUND 1",  "NORMAL",    1, 100, 1.00, 1.35, 1.05,  3,   5,   22, (2, 5)),  # 100s
         (2002, "ROUND 2",  "NORMAL",    2, 100, 1.05, 1.35, 1.10,  4,   7,   24, (2, 5)),  #  95s
-        (3003, "ROUND 3",  "CHALLENGE", 3, 100, 2.00, 1.35, 1.10,  0,   6,   24, (2, 5)),  #  50s
+        (3003, "ROUND 3",  "CHALLENGE", 3, 100, 2.00, 1.65, 1.10,  5,   6,   24, (2, 5)),  #  50s
         (4004, "ROUND 4",  "NORMAL",    4, 100, 1.12, 1.35, 1.15,  4,   9,   26, (2, 4)),  #  89s
         (5005, "ROUND 5",  "NORMAL",    5, 100, 1.20, 1.35, 1.18,  5,  11,   28, (2, 4)),  #  83s
         (6006, "ROUND 6",  "NORMAL",    6, 100, 1.28, 1.35, 1.20,  5,  12,   30, (2, 4)),  #  78s
-        (7007, "ROUND 7",  "CHALLENGE", 7, 100, 2.27, 1.35, 1.20,  0,   9,   30, (2, 4)),  #  44s
+        (7007, "ROUND 7",  "CHALLENGE", 7, 100, 2.27, 1.65, 1.20,  6,   9,   30, (2, 4)),  #  44s
         (8008, "ROUND 8",  "NORMAL",    8, 100, 1.36, 1.35, 1.22,  6,  13,   32, (2, 4)),  #  74s
         (9009, "ROUND 9",  "NORMAL",    9, 100, 1.45, 1.35, 1.24,  6,  14,   34, (2, 3)),  #  69s
         (1010, "ROUND 10", "NORMAL",   10, 100, 1.53, 1.35, 1.26,  7,  15,   36, (2, 3)),  #  65s
-        (1111, "ROUND 11", "CHALLENGE",11, 100, 2.58, 1.35, 1.26,  0,  12,   36, (2, 3)),  #  39s
+        (1111, "ROUND 11", "CHALLENGE",11, 100, 2.58, 1.65, 1.26,  7,  12,   36, (2, 3)),  #  39s
         (1212, "ROUND 12", "NORMAL",   12, 100, 1.63, 1.35, 1.28,  7,  16,   38, (2, 3)),  #  61s
     ]
     for i, (seed, name, rtype, diff, fuel, drain, pspd, espd, cars, rocks,

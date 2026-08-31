@@ -207,7 +207,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         144 gameplay tests, run with `make test`
+tests/         154 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -304,8 +304,10 @@ gameplay code. The judgement calls made for this phase:
   Isolated in `LuckyFlagBonusCalculator`.
 - **Special Flag lifetime** — the ×2 multiplier persists for the rest of the round and is
   cleared when a car is lost.
-- **Challenging Stage** — no cars are placed, a perfect clear pays 5000, and ending early
-  (dry tank or a rock) does not cost a life. Isolated in `ChallengeStage`.
+- **Challenging Stage** — the track starts clear, the player's car is faster, an empty tank
+  releases the penned cars at `Round::CHASE_SPEED_MULTIPLE` (2x the player) after a half
+  second, a perfect clear pays 5000, and ending early never costs a life. Isolated in
+  `ChallengeStage` and `Round::startChallengeChase`.
 - **Bonus car** — one extra car at 20,000 points.
 - **Losing a life** — requested house rule, not original: the flags already collected stay
   collected, and the scoring ladder carries on where it left off. Only the car, the pursuit

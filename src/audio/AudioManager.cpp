@@ -184,6 +184,12 @@ void AudioManager::play(Sfx s, int variant) {
             submit({ {880.f, 0.05f, 0.55f} });
             break;
 
+        case Sfx::ChaseAlarm:
+            // A siren climbing twice: unmistakably "get moving".
+            submit({ {440.f, 0.10f, 1.0f}, {587.f, 0.10f, 1.0f}, {784.f, 0.12f, 1.0f},
+                     {440.f, 0.10f, 1.0f}, {587.f, 0.10f, 1.0f}, {988.f, 0.26f, 1.0f} });
+            break;
+
         case Sfx::GameOver:
             submit({ {392.f, 0.16f, 0.9f}, {330.f, 0.16f, 0.9f},
                      {262.f, 0.16f, 0.9f}, {196.f, 0.34f, 0.9f} });
