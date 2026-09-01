@@ -65,16 +65,18 @@ void AudioManager::mix(int16_t* out, int frames) {
         int sample = 0;
 
         const std::vector<int16_t>& music = tracks_[static_cast<size_t>(current_)];
-        if (musicPlaying_ && !music.empty()) {
+        if (musicPlaying_ && !music.empty() && !musicPaused_) {
             // Muting drops the music out of the mix but keeps the playhead
             // moving, so unmuting rejoins the track instead of restarting it.
+            // Pausing freezes the playhead instead, so the game resumes on the
+            // same beat it stopped on.
             if (!musicMuted_) sample += static_cast<int>(music[musicPos_] * MUSIC_GAIN);
             if (++musicPos_ >= music.size()) musicPos_ = 0;    // seamless loop
         }
 
         for (auto& v : voices_) {
             if (!v.active) continue;
-            sample += v.data[v.pos];
+            if (!sfxMuted_) sample += v.data[v.pos];
             if (++v.pos >= v.data.size()) { v.active = false; v.pos = 0; }
         }
 
@@ -110,7 +112,7 @@ void AudioManager::render(const std::vector<Tone>& tones, std::vector<int16_t>& 
 }
 
 void AudioManager::submit(const std::vector<Tone>& tones) {
-    if (!enabled()) return;
+    if (!enabled() || sfxMuted_) return;
 
     std::vector<int16_t> buf;
     render(tones, buf);
@@ -279,6 +281,26 @@ void AudioManager::setMusicMuted(bool muted) {
 bool AudioManager::toggleMusicMute() {
     setMusicMuted(!musicMuted_);
     return musicMuted_;
+}
+
+void AudioManager::setSfxMuted(bool muted) {
+    if (sfxMuted_ == muted) return;
+    if (ready_) SDL_LockAudioDevice(device_);
+    sfxMuted_ = muted;
+    if (ready_) SDL_UnlockAudioDevice(device_);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "sound effects %s", muted ? "muted" : "unmuted");
+}
+
+bool AudioManager::toggleSfxMute() {
+    setSfxMuted(!sfxMuted_);
+    return sfxMuted_;
+}
+
+void AudioManager::setMusicPaused(bool paused) {
+    if (musicPaused_ == paused) return;
+    if (ready_) SDL_LockAudioDevice(device_);
+    musicPaused_ = paused;
+    if (ready_) SDL_UnlockAudioDevice(device_);
 }
 
 void AudioManager::stopMusic() {

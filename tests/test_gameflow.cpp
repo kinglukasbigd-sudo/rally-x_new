@@ -584,3 +584,143 @@ TEST(mute_survives_losing_a_life_and_a_new_game) {
     CHECK(h.waitFor(GameState::Ready, 60 * 5));
     CHECK(h.g.audio().musicMuted());
 }
+
+// ---------------------------------------------------------------------------
+// Sound-effect mute, and pause.
+// ---------------------------------------------------------------------------
+
+TEST(sound_effects_mute_independently_of_the_music) {
+    AudioManager a;
+    CHECK(!a.sfxMuted());
+    CHECK(!a.musicMuted());
+
+    CHECK(a.toggleSfxMute());
+    CHECK(a.sfxMuted());
+    CHECK(!a.musicMuted());        // the music is left alone
+
+    a.toggleMusicMute();
+    CHECK(a.musicMuted());
+    CHECK(a.sfxMuted());           // and muting music leaves effects alone
+
+    CHECK(!a.toggleSfxMute());
+    CHECK(!a.sfxMuted());
+    CHECK(a.musicMuted());
+}
+
+TEST(the_sound_key_toggles_effects_in_game) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    CHECK(!h.g.audio().sfxMuted());
+    h.press(Action::MuteSfx);
+    CHECK(h.g.audio().sfxMuted());
+    CHECK(!h.g.audio().musicMuted());   // untouched
+    h.press(Action::MuteSfx);
+    CHECK(!h.g.audio().sfxMuted());
+}
+
+TEST(pause_freezes_the_round) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    h.run(30);
+    h.press(Action::Pause);
+    CHECK(h.g.paused());
+
+    const Vec2  pos  = h.g.round().player().position();
+    const float fuel = h.g.round().fuel().fuel();
+    std::vector<std::pair<float,float>> cars;
+    for (const auto& e : h.g.round().enemies()) cars.push_back({e.position().x, e.position().y});
+
+    h.run(180);                          // three seconds of nothing happening
+
+    CHECK_NEAR(h.g.round().player().position().x, pos.x, 0.001);
+    CHECK_NEAR(h.g.round().player().position().y, pos.y, 0.001);
+    CHECK_NEAR(h.g.round().fuel().fuel(), fuel, 0.001);     // fuel does not burn
+    for (size_t i = 0; i < cars.size(); ++i) {
+        CHECK_NEAR(h.g.round().enemies()[i].position().x, cars[i].first,  0.001);
+        CHECK_NEAR(h.g.round().enemies()[i].position().y, cars[i].second, 0.001);
+    }
+    CHECK(h.g.state() == GameState::Playing);
+}
+
+TEST(unpausing_lets_the_round_carry_on) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+
+    h.press(Action::Pause);
+    CHECK(h.g.paused());
+    const float held = h.g.round().fuel().fuel();
+    h.run(120);
+
+    h.press(Action::Pause);
+    CHECK(!h.g.paused());
+    h.run(120);
+    CHECK(h.g.round().fuel().fuel() < held);     // time is passing again
+}
+
+TEST(pause_stops_the_music_without_changing_the_mute_setting) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+    CHECK(!h.g.audio().musicMuted());
+
+    h.press(Action::Pause);
+    CHECK(h.g.audio().musicPaused());
+    CHECK(!h.g.audio().musicMuted());   // pausing is not muting
+
+    h.press(Action::Pause);
+    CHECK(!h.g.audio().musicPaused());
+    CHECK(!h.g.audio().musicMuted());
+}
+
+TEST(menus_and_between_round_cards_cannot_be_paused) {
+    HeadlessGame h; CHECK(h.ok);
+    CHECK(h.g.state() == GameState::StartScreen);
+    h.press(Action::Pause);
+    CHECK(!h.g.paused());               // nothing to freeze on the title
+
+    h.press(Action::Start);
+    CHECK(h.g.state() == GameState::Ready);
+    h.press(Action::Pause);
+    CHECK(!h.g.paused());               // nor on the READY card
+}
+
+TEST(a_state_change_never_leaves_the_game_paused) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+    h.press(Action::Pause);
+    CHECK(h.g.paused());
+
+    // Clearing the round while paused would otherwise strand the next round.
+    h.g.debugCollectAllFlags();
+    h.press(Action::Pause);             // unpause so the round can finish
+    h.run(1);
+    CHECK(h.g.state() == GameState::RoundComplete);
+    CHECK(!h.g.paused());
+    CHECK(h.waitFor(GameState::Ready, 60 * 5));
+    CHECK(!h.g.paused());
+}
+
+TEST(a_paused_challenging_stage_does_not_run_its_fuel_down) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    for (int round = 1; round <= 2; ++round) {
+        CHECK(h.waitFor(GameState::Playing, 60 * 10));
+        h.g.debugCollectAllFlags();
+        h.run(1);
+        CHECK(h.waitFor(GameState::Ready, 60 * 5));
+    }
+    CHECK(h.waitFor(GameState::ChallengingStage, 60 * 5));
+
+    h.press(Action::Pause);
+    CHECK(h.g.paused());
+    const float fuel = h.g.round().fuel().fuel();
+    h.run(300);
+    CHECK_NEAR(h.g.round().fuel().fuel(), fuel, 0.001);
+    CHECK(!h.g.round().chaseActive());   // and the cars stay penned
+}

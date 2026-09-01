@@ -10,7 +10,7 @@ namespace rx {
 // scancodes, so a different source (touch, gamepad) can be added later by
 // feeding the same action set -- Player movement never has to change.
 enum class Action {
-    Up, Down, Left, Right, Smoke, Start, Pause, Quit, Debug, MuteMusic,
+    Up, Down, Left, Right, Smoke, Start, Pause, Quit, Debug, MuteMusic, MuteSfx,
     Count
 };
 

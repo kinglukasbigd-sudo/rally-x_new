@@ -137,7 +137,9 @@ touches by default, which makes a phone deliver every gesture twice.
 | Enter / 1 | Start |
 | P | Pause flag (reserved) |
 | Esc | Quit |
+| P | Pause / resume |
 | M | Mute / unmute the music |
+| N | Mute / unmute the sound effects |
 | F12 | Toggle the debug overlay |
 
 Debug toggles, available once the overlay is on: `F1` collision boxes, `F2` navigation
@@ -208,7 +210,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         154 gameplay tests, run with `make test`
+tests/         168 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -241,15 +243,32 @@ runs at, so nothing is resampled at run time -- and it is mixed in at
 `AudioManager::MUSIC_GAIN` (0.15), which puts it comfortably under the effects. Change that
 one constant to make it louder or quieter.
 
+### Pausing
+
+`P` pauses and resumes, and on a touch device there is a pause button in the top corner of
+the screen -- a phone has no P key, so without it a round cannot be stopped. While paused
+the whole round freezes: the car, the pursuit, the fuel and the state clock all stop, and
+the music stops with them. Tapping anywhere resumes on touch.
+
+Pausing is not muting: it freezes the music where it is, so resuming picks up on the same
+beat rather than restarting the loop, and it never changes what you chose to hear. Only a
+running round can be paused -- there is nothing to freeze on a menu or a between-round card.
+
 ### Muting
 
-`M` toggles the music on and off, and on a touch device there is a `[ MUSIC: ON ]` toggle on
-the title screen next to the controls one. It silences the music only -- the sound effects
-carry on, so you can still hear a flag or a crash.
+Music and sound effects mute separately, so either can be silenced on its own.
 
-The loop keeps running underneath while muted, so unmuting rejoins the track where it would
-have been rather than restarting it. The setting lasts for the session; it is not written to
-disk, so the game starts unmuted.
+| | Key | Touch |
+| --- | --- | --- |
+| Music | `M` | `[ MUSIC: ON ]` on the title screen |
+| Sound effects | `N` | `[ SOUND: ON ]` on the title screen |
+
+Muting the music silences it but leaves the loop running underneath, so unmuting rejoins the
+track where it would have been rather than restarting it. Muting the sound effects silences
+the flags, the crashes, the smoke and the menu blips while the music carries on.
+
+Both settings last for the session; they are not written to disk, so the game starts with
+everything on.
 
 ### Using your own music
 

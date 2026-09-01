@@ -39,6 +39,7 @@ public:
     void pumpInput() { handleEvents(); }
     void step(float dt);
     GameState state() const { return state_; }
+    bool paused() const { return paused_; }
     const Round& round() const { return round_; }
     const ScoreSystem& score() const { return score_; }
     const LifeSystem&  lifeSystem() const { return lives_; }
@@ -67,6 +68,9 @@ private:
     void renderDebug();
     void drawTouchControls();
     void drawSwipeFeedback();
+    void drawPauseButton();
+    void setPaused(bool on);
+    bool canPause() const;
 
     Renderer       renderer_;
     SpriteRenderer sprites_;
@@ -96,6 +100,9 @@ private:
     int       lastLives_  = START_LIVES;
     Rect      schemeToggleRect_{};
     Rect      musicToggleRect_{};
+    Rect      soundToggleRect_{};
+    Rect      pauseButtonRect_{};
+    bool      paused_ = false;
     float     muteNoticeTimer_ = 0.f;
     bool      hasTouchDevice_ = false;
 

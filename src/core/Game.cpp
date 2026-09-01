@@ -15,8 +15,9 @@ constexpr float READY_SECONDS          = 2.0f;
 constexpr float ROUND_COMPLETE_SECONDS = 2.5f;
 constexpr float DEATH_SECONDS          = 2.0f;
 // Title-screen control-scheme toggle, in framebuffer pixels.
-constexpr int   TOGGLE_TEXT_Y          = 170;
-constexpr int   MUSIC_TEXT_Y           = 188;
+constexpr int   TOGGLE_TEXT_Y          = 166;
+constexpr int   MUSIC_TEXT_Y           = 182;
+constexpr int   SOUND_TEXT_Y           = 196;
 constexpr int   TOGGLE_BOX_X           = 82;
 constexpr int   TOGGLE_BOX_W           = 124;
 constexpr int   TOGGLE_BOX_H           = 18;
@@ -238,9 +239,24 @@ void Game::loadRound(int roundNumber) {
     theme_ = themeFor(roundNumber);
 }
 
+bool Game::canPause() const {
+    // Only a running round can be paused; menus and the between-round cards
+    // have nothing to freeze.
+    return state_ == GameState::Playing || state_ == GameState::ChallengingStage;
+}
+
+void Game::setPaused(bool on) {
+    if (paused_ == on) return;
+    paused_ = on;
+    // The music stops where it is rather than being muted, so resuming picks
+    // up on the same beat instead of restarting the loop.
+    audio_.setMusicPaused(on);
+}
+
 void Game::setState(GameState s) {
     state_ = s;
     stateTimer_ = 0.f;
+    setPaused(false);          // never arrive in a new state still paused
 
     // Each kind of round has its own track; everything in between -- the title
     // screen, the READY card, a death, a cleared round -- stays quiet so the
@@ -347,6 +363,18 @@ void Game::handleEvents() {
                             audio_.play(Sfx::Flag);
                             break;
                         }
+                        if (state_ == GameState::StartScreen && hitToggle(soundToggleRect_, x, y)) {
+                            audio_.toggleSfxMute();
+                            audio_.play(Sfx::Flag);   // heard only if it just came back on
+                            break;
+                        }
+                        if (hitToggle(pauseButtonRect_, x, y) && (canPause() || paused_)) {
+                            setPaused(!paused_);
+                            break;
+                        }
+                        // While paused, a tap anywhere else resumes rather
+                        // than steering or laying smoke.
+                        if (paused_) { setPaused(false); break; }
                         touch_.fingerDown(e.tfinger.fingerId, x, y);
                     } else {
                         touch_.fingerMove(e.tfinger.fingerId, x, y);
@@ -373,6 +401,16 @@ void Game::handleEvents() {
                         audio_.play(Sfx::Flag);
                         break;
                     }
+                    if (state_ == GameState::StartScreen && hitToggle(soundToggleRect_, x, y)) {
+                        audio_.toggleSfxMute();
+                        audio_.play(Sfx::Flag);
+                        break;
+                    }
+                    if (hitToggle(pauseButtonRect_, x, y) && (canPause() || paused_)) {
+                        setPaused(!paused_);
+                        break;
+                    }
+                    if (paused_) { setPaused(false); break; }
                     touch_.fingerDown(-1, x, y);
                     break;
                 }
@@ -427,8 +465,7 @@ void Game::handleEvents() {
 void Game::step(float dt) { fixedUpdate(dt); }
 
 void Game::fixedUpdate(float dt) {
-    ++tick_;
-    stateTimer_ += dt;
+    ++tick_;                       // keeps blinking text alive while paused
     touch_.update(dt);
     muteNoticeTimer_ = std::max(0.f, muteNoticeTimer_ - dt);
 
@@ -439,6 +476,16 @@ void Game::fixedUpdate(float dt) {
         audio_.toggleMusicMute();
         muteNoticeTimer_ = 1.6f;      // say so on screen, briefly
     }
+    if (input_.pressed(Action::MuteSfx)) {
+        audio_.toggleSfxMute();
+        muteNoticeTimer_ = 1.6f;
+    }
+    if (input_.pressed(Action::Pause) && canPause()) setPaused(!paused_);
+
+    // A paused game still ticks its clock for blinking text, but neither the
+    // round nor the state timer moves on.
+    if (paused_) return;
+    stateTimer_ += dt;
 
     switch (state_) {
         case GameState::StartScreen:
@@ -559,11 +606,21 @@ void Game::render() {
 
         renderOverlayText();
 
+        if (paused_) {
+            const int px = VIEW_X + VIEW_W / 2;
+            renderer_.fillRect(VIEW_X, VIEW_Y + VIEW_H / 2 - 14, VIEW_W, 30, pal::Black);
+            renderer_.textCentered(px, VIEW_Y + VIEW_H / 2 - 10, "PAUSED", pal::Accent);
+            renderer_.textCentered(px, VIEW_Y + VIEW_H / 2 + 4,
+                                   touch_.enabled() ? "TAP TO RESUME" : "PRESS P TO RESUME",
+                                   pal::TextDim);
+        }
+
         // Toggling music mid-round is invisible otherwise: you cannot tell a
         // mute from a track that simply has a quiet passage.
         if (muteNoticeTimer_ > 0.f)
             renderer_.textCentered(VIEW_X + VIEW_W / 2, VIEW_Y + 6,
-                                   audio_.musicMuted() ? "MUSIC OFF" : "MUSIC ON",
+                                   std::string("MUSIC ") + (audio_.musicMuted() ? "OFF" : "ON") +
+                                   "   SOUND " + (audio_.sfxMuted() ? "OFF" : "ON"),
                                    pal::Accent);
     }
 
@@ -583,9 +640,12 @@ void Game::render() {
                                       TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
             musicToggleRect_  = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (MUSIC_TEXT_Y - 5) * sy,
                                       TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
+            soundToggleRect_  = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (SOUND_TEXT_Y - 5) * sy,
+                                      TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
         } else {
             schemeToggleRect_ = Rect{};
             musicToggleRect_  = Rect{};
+            soundToggleRect_  = Rect{};
         }
     }
     renderer_.endPresent();
@@ -598,6 +658,7 @@ void Game::drawTouchControls() {
     renderer_.windowSize(winW, winH);
     touch_.layout(winW, winH, renderer_.gameRect());
 
+    drawPauseButton();
     if (touch_.scheme() == TouchScheme::Swipe) { drawSwipeFeedback(); return; }
 
     // A filled triangle, built from rows: no anti-aliasing, no curves.
@@ -659,6 +720,39 @@ void Game::drawTouchControls() {
 // The only thing the swipe scheme puts on screen: a square that fills up while
 // a finger is held, so the two-second wait for smoke is visible rather than
 // guessed at.  Nothing is drawn over the playfield during normal play.
+// A small pause control in the top corner of the screen, outside the
+// playfield.  A phone has no P key, so a round cannot otherwise be stopped.
+void Game::drawPauseButton() {
+    if (!canPause() && !paused_) { pauseButtonRect_ = Rect{}; return; }
+
+    int winW = 0, winH = 0;
+    renderer_.windowSize(winW, winH);
+    const float size = std::max(28.f, std::min(winW, winH) * 0.055f);
+    const float pad  = size * 0.45f;
+    pauseButtonRect_ = Rect{ winW - size - pad, pad, size, size };
+
+    const Rect& r = pauseButtonRect_;
+    const int x = static_cast<int>(r.x), y = static_cast<int>(r.y);
+    const int w = static_cast<int>(r.w);
+
+    renderer_.fillRect(x, y, w, w, Color{ 255, 255, 255, 26 });
+    renderer_.drawRect(x, y, w, w, Color{ 200, 200, 210, 110 });
+
+    const Color mark{ 235, 235, 245, 200 };
+    if (paused_) {
+        // A play triangle: built from rows, so it stays hard-edged.
+        const int steps = w / 3;
+        for (int i = 0; i < steps; ++i) {
+            const int h = (steps - i) * 2;
+            renderer_.fillRect(x + w / 3 + i, y + w / 2 - h / 2, 1, h, mark);
+        }
+    } else {
+        const int bw = std::max(2, w / 8);
+        renderer_.fillRect(x + w / 2 - bw * 2, y + w / 4, bw, w / 2, mark);
+        renderer_.fillRect(x + w / 2 + bw,     y + w / 4, bw, w / 2, mark);
+    }
+}
+
 void Game::drawSwipeFeedback() {
     if (!touch_.holdCharging() && !touch_.smoking()) return;
 
@@ -705,31 +799,34 @@ void Game::renderStartScreen() {
     if ((tick_ / 30) % 2 == 0)
         renderer_.textCentered(cx, 142, "PRESS START", pal::Text);
 
-    const bool muted = audio_.musicMuted();
+    const bool musicOff = audio_.musicMuted();
+    const bool soundOff = audio_.sfxMuted();
+    auto toggleColour = [](bool off) { return off ? pal::TextDim : pal::Accent; };
 
     if (touch_.enabled()) {
         const bool swipe = (touch_.scheme() == TouchScheme::Swipe);
         renderer_.textCentered(cx, 154, "TAP TO START", pal::TextDim);
 
-        // Both toggles sit mid-screen on purpose: the bottom edge of a phone
+        // The toggles sit mid-screen on purpose: the bottom edge of a phone
         // belongs to the system's navigation gestures, and a control parked
         // there simply never gets the touch.
         renderer_.textCentered(cx, TOGGLE_TEXT_Y, swipe ? "[ CONTROLS: SWIPE ]"
                                                         : "[ CONTROLS: PAD ]", pal::Accent);
-        renderer_.textCentered(cx, MUSIC_TEXT_Y, muted ? "[ MUSIC: OFF ]"
-                                                       : "[ MUSIC: ON ]",
-                               muted ? pal::TextDim : pal::Accent);
+        renderer_.textCentered(cx, MUSIC_TEXT_Y, musicOff ? "[ MUSIC: OFF ]" : "[ MUSIC: ON ]",
+                               toggleColour(musicOff));
+        renderer_.textCentered(cx, SOUND_TEXT_Y, soundOff ? "[ SOUND: OFF ]" : "[ SOUND: ON ]",
+                               toggleColour(soundOff));
 
-        renderer_.textCentered(cx, 206, swipe ? "SWIPE TO DRIVE" : "PAD TO DRIVE", pal::TextDim);
-        renderer_.textCentered(cx, 216, swipe ? "TAP FOR SMOKE"
-                                              : "BUTTON FOR SMOKE", pal::TextDim);
+        renderer_.textCentered(cx, 212, swipe ? "SWIPE DRIVE   TAP SMOKE"
+                                              : "PAD DRIVE   BUTTON SMOKE", pal::TextDim);
     } else {
         renderer_.textCentered(cx, 154, "ENTER OR SPACE", pal::TextDim);
-        renderer_.textCentered(cx, MUSIC_TEXT_Y, muted ? "[ MUSIC: OFF ]"
-                                                       : "[ MUSIC: ON ]",
-                               muted ? pal::TextDim : pal::Accent);
-        renderer_.textCentered(cx, 206, "ARROWS DRIVE   SPACE SMOKE", pal::TextDim);
-        renderer_.textCentered(cx, 216, "M MUTES MUSIC", pal::TextDim);
+        renderer_.textCentered(cx, MUSIC_TEXT_Y, musicOff ? "[ MUSIC: OFF ]" : "[ MUSIC: ON ]",
+                               toggleColour(musicOff));
+        renderer_.textCentered(cx, SOUND_TEXT_Y, soundOff ? "[ SOUND: OFF ]" : "[ SOUND: ON ]",
+                               toggleColour(soundOff));
+        renderer_.textCentered(cx, 204, "ARROWS DRIVE   SPACE SMOKE", pal::TextDim);
+        renderer_.textCentered(cx, 213, "M MUSIC   N SOUND   P PAUSE", pal::TextDim);
     }
 
     if (score_.highScore() > 0) {

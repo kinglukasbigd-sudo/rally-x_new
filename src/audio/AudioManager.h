@@ -61,6 +61,17 @@ public:
     bool toggleMusicMute();                       // returns the new state
     bool musicMuted() const { return musicMuted_; }
 
+    // The sound effects -- flags, crashes, the smoke, the menu blips -- muted
+    // independently of the music, so either can be silenced on its own.
+    void setSfxMuted(bool muted);
+    bool toggleSfxMute();                         // returns the new state
+    bool sfxMuted() const { return sfxMuted_; }
+
+    // Freezes the music where it is while the game is paused.  Separate from
+    // the mute so pausing never changes what the player chose to hear.
+    void setMusicPaused(bool paused);
+    bool musicPaused() const { return musicPaused_; }
+
     void setEnabled(bool on) { enabled_ = on; }
     bool enabled() const { return enabled_ && ready_; }
 
@@ -99,6 +110,8 @@ private:
     size_t     musicPos_     = 0;
     bool       musicPlaying_ = false;
     bool       musicMuted_   = false;
+    bool       musicPaused_  = false;
+    bool       sfxMuted_     = false;
 };
 
 } // namespace rx
