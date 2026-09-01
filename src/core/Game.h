@@ -40,6 +40,7 @@ public:
     void step(float dt);
     GameState state() const { return state_; }
     bool paused() const { return paused_; }
+    Rect pauseButtonRect() const { return pauseButtonRect_; }
     const Round& round() const { return round_; }
     const ScoreSystem& score() const { return score_; }
     const LifeSystem&  lifeSystem() const { return lives_; }
@@ -69,6 +70,7 @@ private:
     void drawTouchControls();
     void drawSwipeFeedback();
     void drawPauseButton();
+    void updatePauseButtonRect();
     void setPaused(bool on);
     bool canPause() const;
 

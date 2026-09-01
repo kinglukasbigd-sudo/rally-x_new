@@ -724,3 +724,109 @@ TEST(a_paused_challenging_stage_does_not_run_its_fuel_down) {
     CHECK_NEAR(h.g.round().fuel().fuel(), fuel, 0.001);
     CHECK(!h.g.round().chaseActive());   // and the cars stay penned
 }
+
+// ---------------------------------------------------------------------------
+// The pause button is the only way in and the only way out.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Tap a point given in normalised window coordinates.
+void tapAt(HeadlessGame& h, float nx, float ny) {
+    pushFinger(SDL_FINGERDOWN, 5, nx, ny);
+    h.g.pumpInput();
+    h.g.step(static_cast<float>(FIXED_DT));
+    pushFinger(SDL_FINGERUP, 5, nx, ny);
+    h.g.pumpInput();
+    h.g.step(static_cast<float>(FIXED_DT));
+}
+
+// The middle of the pause button, normalised.  Pumping first because the
+// rect is recomputed there, and it only exists once a round is running.
+std::pair<float,float> pauseButtonPoint(HeadlessGame& h) {
+    h.g.pumpInput();
+    const Rect r = h.g.pauseButtonRect();
+    if (r.w <= 0.f) return { -1.f, -1.f };
+    // The harness never presents, so the renderer reports its default size.
+    return { (r.x + r.w * 0.5f) / SCREEN_W, (r.y + r.h * 0.5f) / SCREEN_H };
+}
+
+} // namespace
+
+TEST(tapping_the_pause_button_pauses_and_tapping_it_again_resumes) {
+    HeadlessGame h(/*touch=*/true, TouchScheme::Swipe);
+    CHECK(h.ok);
+    tapAt(h, 0.5f, 0.5f);                       // tap to start
+    for (int i = 0; i < 300 && h.g.state() != GameState::Playing; ++i) idle(h, 1);
+    CHECK(h.g.state() == GameState::Playing);
+
+    const auto btn = pauseButtonPoint(h);
+    CHECK(btn.first > 0.f);
+
+    tapAt(h, btn.first, btn.second);
+    CHECK(h.g.paused());
+
+    tapAt(h, btn.first, btn.second);
+    CHECK(!h.g.paused());                       // the same button lets it go
+}
+
+TEST(tapping_anywhere_else_does_not_resume) {
+    HeadlessGame h(/*touch=*/true, TouchScheme::Swipe);
+    CHECK(h.ok);
+    tapAt(h, 0.5f, 0.5f);
+    for (int i = 0; i < 300 && h.g.state() != GameState::Playing; ++i) idle(h, 1);
+
+    const auto btn = pauseButtonPoint(h);
+    tapAt(h, btn.first, btn.second);
+    CHECK(h.g.paused());
+
+    // Several taps around the screen, none of them on the button.
+    for (auto p : { std::make_pair(0.5f, 0.5f), std::make_pair(0.2f, 0.8f),
+                    std::make_pair(0.8f, 0.9f), std::make_pair(0.1f, 0.2f) }) {
+        tapAt(h, p.first, p.second);
+        CHECK(h.g.paused());                    // still paused, every time
+    }
+
+    tapAt(h, btn.first, btn.second);
+    CHECK(!h.g.paused());
+}
+
+TEST(a_tap_while_paused_does_not_lay_smoke_or_steer) {
+    HeadlessGame h(/*touch=*/true, TouchScheme::Swipe);
+    CHECK(h.ok);
+    tapAt(h, 0.5f, 0.5f);
+    for (int i = 0; i < 300 && h.g.state() != GameState::Playing; ++i) idle(h, 1);
+
+    const auto btn = pauseButtonPoint(h);
+    tapAt(h, btn.first, btn.second);
+    CHECK(h.g.paused());
+
+    const float fuel  = h.g.round().fuel().fuel();
+    const int   puffs = h.g.round().smoke().activeCount();
+    const Vec2  pos   = h.g.round().player().position();
+
+    for (int i = 0; i < 4; ++i) tapAt(h, 0.4f, 0.6f);
+    idle(h, 60);
+
+    CHECK_NEAR(h.g.round().fuel().fuel(), fuel, 0.001);
+    CHECK_EQ(h.g.round().smoke().activeCount(), puffs);
+    CHECK_NEAR(h.g.round().player().position().x, pos.x, 0.001);
+
+    // And resuming does not then fire everything that was tapped meanwhile.
+    tapAt(h, btn.first, btn.second);
+    CHECK(!h.g.paused());
+    idle(h, 5);
+    CHECK_EQ(h.g.round().smoke().activeCount(), puffs);
+}
+
+TEST(the_pause_button_only_exists_while_a_round_is_running) {
+    HeadlessGame h(/*touch=*/true, TouchScheme::Swipe);
+    CHECK(h.ok);
+    h.g.pumpInput();
+    CHECK_EQ(static_cast<int>(h.g.pauseButtonRect().w), 0);   // no button on the title
+
+    tapAt(h, 0.5f, 0.5f);
+    for (int i = 0; i < 300 && h.g.state() != GameState::Playing; ++i) idle(h, 1);
+    h.g.pumpInput();
+    CHECK(h.g.pauseButtonRect().w > 0.f);                    // and one during play
+}

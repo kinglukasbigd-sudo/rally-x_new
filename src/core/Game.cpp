@@ -248,6 +248,9 @@ bool Game::canPause() const {
 void Game::setPaused(bool on) {
     if (paused_ == on) return;
     paused_ = on;
+    // Let go of anything being held, so a finger down at the moment of pausing
+    // is not still steering or charging smoke when play resumes.
+    if (on) touch_.releaseAll();
     // The music stops where it is rather than being muted, so resuming picks
     // up on the same beat instead of restarting the loop.
     audio_.setMusicPaused(on);
@@ -333,6 +336,9 @@ bool hitToggle(const rx::Rect& r, float x, float y) {
 
 void Game::handleEvents() {
     input_.beginFrame();
+    // Kept current here rather than only when drawing, so a tap is tested
+    // against where the button actually is right now.
+    updatePauseButtonRect();
 
     int winW = 0, winH = 0;
     renderer_.windowSize(winW, winH);
@@ -372,17 +378,18 @@ void Game::handleEvents() {
                             setPaused(!paused_);
                             break;
                         }
-                        // While paused, a tap anywhere else resumes rather
-                        // than steering or laying smoke.
-                        if (paused_) { setPaused(false); break; }
+                        // While paused the rest of the screen is dead: a tap
+                        // neither resumes nor steers nor lays smoke, so a
+                        // paused game cannot be disturbed by a stray touch.
+                        if (paused_) break;
                         touch_.fingerDown(e.tfinger.fingerId, x, y);
-                    } else {
+                    } else if (!paused_) {
                         touch_.fingerMove(e.tfinger.fingerId, x, y);
                     }
                     break;
                 }
                 case SDL_FINGERUP:
-                    touch_.fingerUp(e.tfinger.fingerId);
+                    if (!paused_) touch_.fingerUp(e.tfinger.fingerId);
                     break;
 
                 // Mouse stands in for a finger so the schemes can be tried on a
@@ -410,7 +417,7 @@ void Game::handleEvents() {
                         setPaused(!paused_);
                         break;
                     }
-                    if (paused_) { setPaused(false); break; }
+                    if (paused_) break;
                     touch_.fingerDown(-1, x, y);
                     break;
                 }
@@ -434,7 +441,9 @@ void Game::handleEvents() {
         input_.handleEvent(e);
     }
 
-    if (touch_.enabled()) {
+    if (touch_.enabled() && paused_) {
+        touch_.consumeTap();       // drop anything in flight; nothing acts on it
+    } else if (touch_.enabled()) {
         touch_.applyTo(input_);
 
         // A tap means different things depending on where the game is.  While
@@ -611,7 +620,7 @@ void Game::render() {
             renderer_.fillRect(VIEW_X, VIEW_Y + VIEW_H / 2 - 14, VIEW_W, 30, pal::Black);
             renderer_.textCentered(px, VIEW_Y + VIEW_H / 2 - 10, "PAUSED", pal::Accent);
             renderer_.textCentered(px, VIEW_Y + VIEW_H / 2 + 4,
-                                   touch_.enabled() ? "TAP TO RESUME" : "PRESS P TO RESUME",
+                                   touch_.enabled() ? "TAP PAUSE TO RESUME" : "PRESS P TO RESUME",
                                    pal::TextDim);
         }
 
@@ -722,14 +731,19 @@ void Game::drawTouchControls() {
 // guessed at.  Nothing is drawn over the playfield during normal play.
 // A small pause control in the top corner of the screen, outside the
 // playfield.  A phone has no P key, so a round cannot otherwise be stopped.
-void Game::drawPauseButton() {
-    if (!canPause() && !paused_) { pauseButtonRect_ = Rect{}; return; }
+void Game::updatePauseButtonRect() {
+    if (!touch_.enabled() || (!canPause() && !paused_)) { pauseButtonRect_ = Rect{}; return; }
 
     int winW = 0, winH = 0;
     renderer_.windowSize(winW, winH);
     const float size = std::max(28.f, std::min(winW, winH) * 0.055f);
     const float pad  = size * 0.45f;
     pauseButtonRect_ = Rect{ winW - size - pad, pad, size, size };
+}
+
+void Game::drawPauseButton() {
+    updatePauseButtonRect();
+    if (pauseButtonRect_.w <= 0.f) return;
 
     const Rect& r = pauseButtonRect_;
     const int x = static_cast<int>(r.x), y = static_cast<int>(r.y);

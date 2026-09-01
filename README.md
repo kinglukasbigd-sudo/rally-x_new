@@ -210,7 +210,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         168 gameplay tests, run with `make test`
+tests/         172 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -248,7 +248,11 @@ one constant to make it louder or quieter.
 `P` pauses and resumes, and on a touch device there is a pause button in the top corner of
 the screen -- a phone has no P key, so without it a round cannot be stopped. While paused
 the whole round freezes: the car, the pursuit, the fuel and the state clock all stop, and
-the music stops with them. Tapping anywhere resumes on touch.
+the music stops with them.
+
+**The button is the only way in and the only way out.** While paused the rest of the screen
+is dead -- a tap there neither resumes nor steers nor lays smoke -- so a paused game cannot
+be disturbed by a stray touch, and resuming never fires off whatever was tapped meanwhile.
 
 Pausing is not muting: it freezes the music where it is, so resuming picks up on the same
 beat rather than restarting the loop, and it never changes what you chose to hear. Only a
