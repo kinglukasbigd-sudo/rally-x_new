@@ -319,7 +319,16 @@ tools/find_loop.py <input.mp3> assets/audio/music_normal.wav --min=12 --max=28
 ```
 
 `--from=S --to=S` slices a region out first, so one file holding two pieces of music can be
-cut into two separate loops.
+cut into two separate loops. `--start=change` pins the loop's beginning to the strongest
+melodic change in the material, rather than wherever the ends happen to join best; `--start=S`
+pins it to a given second. Either way the point is snapped onto the bar grid so the loop
+still begins on a downbeat.
+
+The tool reports every section boundary it finds, with a strength score, so you can pin the
+start to a different one if the strongest is not the one you meant. Boundaries come from
+checkerboard novelty over a chroma self-similarity matrix -- chroma folds every octave onto
+twelve pitch classes, so it follows *which notes are sounding* and picks up a melody change
+that a plain spectrum would miss.
 
 It estimates the tempo *and* the downbeat, restricts the loop to a whole number of bars so
 the rhythm never stutters across the join, scores candidates on spectral continuity and

@@ -17,10 +17,14 @@ thing:
     which removes the click without smearing the music
 
     tools/find_loop.py <input> <output.wav> [--min=S] [--max=S]
-                       [--from=S] [--to=S]
+                       [--from=S] [--to=S] [--start=change|SECONDS]
 
 --from/--to slice a region out of the source first, so one file holding two
 pieces of music can be cut into two separate loops.
+
+--start pins where the loop begins: a number of seconds, or "change" to start
+at the strongest melodic change the analysis can find.  Without it the start is
+chosen purely for how well the ends join.
 """
 import os, subprocess, sys, tempfile, wave
 import numpy as np
@@ -86,6 +90,80 @@ def estimate_downbeat(env, beat, bars=4):
     return off * HOP / RATE
 
 
+def chroma(x):
+    """Pitch-class energy per frame -- what the melody and harmony are doing.
+
+    Chroma folds every octave onto twelve pitch classes, so it tracks *which
+    notes* are sounding rather than the timbre.  A melody change shows up in it
+    far more clearly than in a raw spectrum.
+    """
+    n = 2048
+    frames = 1 + (len(x) - n) // HOP
+    win = np.hanning(n)
+    idx = np.arange(frames)[:, None] * HOP + np.arange(n)
+    mags = np.abs(np.fft.rfft(x[idx] * win, axis=1))
+
+    freqs = np.fft.rfftfreq(n, 1.0 / RATE)
+    keep = (freqs > 65.0) & (freqs < 2000.0)          # the melodic register
+    pc = np.zeros(len(freqs), dtype=int)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0, freqs, 1.0) / 440.0)
+    pc[keep] = np.round(midi[keep]).astype(int) % 12
+
+    out = np.zeros((frames, 12))
+    for k in range(12):
+        sel = keep & (pc == k)
+        if sel.any():
+            out[:, k] = mags[:, sel].sum(axis=1)
+    norm = np.linalg.norm(out, axis=1, keepdims=True) + 1e-9
+    return out / norm
+
+
+def section_boundaries(x, beat, top=8):
+    """Where the music changes, by checkerboard novelty on self-similarity.
+
+    A section boundary is a point where everything before it resembles itself,
+    everything after resembles itself, and the two do not resemble each other.
+    A checkerboard kernel slid down the diagonal of the self-similarity matrix
+    scores exactly that.
+    """
+    C = chroma(x)
+    if len(C) < 16:
+        return []
+    S = C @ C.T                                        # cosine self-similarity
+
+    # Kernel half-width of roughly two bars: long enough to span a phrase.
+    half = max(4, int(round((beat or 0.5) * 8 * RATE / HOP)))
+    if len(S) < 2 * half + 2:
+        half = max(2, len(S) // 4)
+
+    k = np.ones((2 * half, 2 * half))
+    k[:half, half:] = -1.0
+    k[half:, :half] = -1.0
+    # Taper, so the score reflects the join rather than distant material.
+    g = np.exp(-0.5 * (np.linspace(-2, 2, 2 * half) ** 2))
+    k *= np.outer(g, g)
+
+    nov = np.zeros(len(S))
+    for i in range(half, len(S) - half):
+        nov[i] = float((S[i - half:i + half, i - half:i + half] * k).sum())
+    if nov.max() > 0:
+        nov /= nov.max()
+
+    # Peak pick with a minimum spacing of about four bars.
+    gap = max(4, int(round((beat or 0.5) * 16 * RATE / HOP)))
+    order = np.argsort(nov)[::-1]
+    picked = []
+    for i in order:
+        if nov[i] <= 0:
+            break
+        if all(abs(i - j) >= gap for j in picked):
+            picked.append(int(i))
+        if len(picked) >= top:
+            break
+    return sorted((i * HOP / RATE, float(nov[i])) for i in picked)
+
+
 def spectrogram(x):
     n = 2048
     frames = 1 + (len(x) - n) // HOP
@@ -139,7 +217,7 @@ def refine(x, s, e, span, w):
     return best[1], best[2], best[0]
 
 
-def find_loop(x, beat, downbeat, min_s, max_s):
+def find_loop(x, beat, downbeat, min_s, max_s, fixed_start=None):
     """Best whole-bar loop, scored on spectral continuity across the join."""
     total = len(x)
     S = spectrogram(x)
@@ -169,6 +247,12 @@ def find_loop(x, beat, downbeat, min_s, max_s):
     step   = int(round(bar * RATE))            # start on a bar line
     win    = int(0.25 * RATE)
 
+    if fixed_start is not None:
+        # Snap the requested point onto the bar grid, so the loop still starts
+        # on a downbeat rather than mid-phrase.
+        k = round((fixed_start - start0) / (bar * RATE))
+        start0 = max(0, int(round(start0 + k * bar * RATE)))
+
     best = (-1e18, start0, start0 + lengths[0])
     for L in lengths:
         if L + ctx * HOP >= total:
@@ -183,6 +267,8 @@ def find_loop(x, beat, downbeat, min_s, max_s):
             score = sim + 0.35 * level + length_bonus
             if score > best[0]:
                 best = (score, s, s + L)
+            if fixed_start is not None:
+                break                          # the start is pinned
             s += step
     return best[1], best[2], best[0]
 
@@ -248,7 +334,26 @@ def main():
           % ("a sample-exact loop is possible" if rep > 0.95 else
              "no literal repeat in this track, so the loop is matched musically"))
 
-    s, e, score = find_loop(x, beat, downbeat, min_s, max_s)
+    bounds = section_boundaries(x, beat)
+    if bounds:
+        print("melody changes:")
+        for t, v in bounds:
+            print("               %6.2fs   strength %.3f" % (t, v))
+
+    fixed = None
+    want = opts.get("--start")
+    if want == "change":
+        if not bounds:
+            print("start       : no clear change found, choosing freely")
+        else:
+            t = max(bounds, key=lambda b: b[1])[0]
+            fixed = int(t * RATE)
+            print("start       : pinned to the strongest change at %.2fs" % t)
+    elif want is not None:
+        fixed = int(float(want) * RATE)
+        print("start       : pinned to %.2fs" % float(want))
+
+    s, e, score = find_loop(x, beat, downbeat, min_s, max_s, fixed)
     s, e = snap_zero(x, s), snap_zero(x, e)
 
     loop = x[s:e].copy()
