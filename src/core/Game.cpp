@@ -199,6 +199,9 @@ void Game::playRoundSounds(const Round::Events& ev) {
     if (ev.specialTaken)    audio_.play(Sfx::SpecialFlag);
     if (ev.luckyTaken)      audio_.play(Sfx::LuckyFlag);
     if (ev.smokePuffed)     audio_.play(Sfx::Smoke);
+    // The boost borrows the special flag's chirp -- a distinct, upbeat cue
+    // that is already in the sound set, rather than a new voice for one event.
+    if (ev.turboTaken)      audio_.play(Sfx::SpecialFlag);
 }
 
 void Game::updateLowFuelWarning(float dt) {
@@ -220,6 +223,10 @@ void Game::loadRound(int roundNumber) {
     if (path.empty() || !maze.load(path)) maze.loadFallback();
 
     LevelData data = maze.data();
+    // The round the player is on, which is what the level-gated features (the
+    // turbo count, and whether the rocks patrol) are keyed on.  It keeps
+    // counting past the authored set rather than wrapping with the maze.
+    data.levelNumber = roundNumber;
 
     // Each full cycle through the authored levels raises the difficulty a step,
     // which is how the original keeps going past its last hand-made layout.
@@ -610,6 +617,7 @@ void Game::render() {
         info.flagsRemaining = round_.flagsRemaining();
         info.multiplier     = score_.multiplier();
         info.challenge      = round_.isChallenge();
+        info.turboFraction  = round_.turbo().fraction();
         hud_.draw(renderer_, info);
         radar_.draw(renderer_, round_, tick_, debug_.radarDebug, theme_);
 
@@ -859,6 +867,10 @@ void Game::renderWorld() {
     for (const auto& rk : round_.rocks())
         if (cam.visible(rk.pos.x, rk.pos.y)) sprites_.drawRock(renderer_, cam, rk.pos);
 
+    for (const auto& t : round_.turbos())
+        if (!t.collected && cam.visible(t.pos.x, t.pos.y))
+            sprites_.drawTurbo(renderer_, cam, t.pos, tick_);
+
     for (const auto& f : round_.flags())
         if (!f.collected && cam.visible(f.pos.x, f.pos.y))
             sprites_.drawFlag(renderer_, cam, f);
@@ -1028,6 +1040,14 @@ void Game::renderDebug() {
     std::snprintf(buf, sizeof buf, "FLAGS %d/%d",
                   round_.flagsCollected(), round_.flagsRequired());         line(buf);
     std::snprintf(buf, sizeof buf, "MULT X%d", score_.multiplier());        line(buf);
+    std::snprintf(buf, sizeof buf, "TURBO %d/%d",
+                  static_cast<int>(round_.turbo().remaining() * 10),
+                  static_cast<int>(round_.turbos().size()));                line(buf);
+    // What the fairness watchdog sees: ways out, room to run, cars standing
+    // down.  ESC 0 should never persist for more than a moment.
+    std::snprintf(buf, sizeof buf, "ESC %d/%d YIELD %d",
+                  round_.escapeState().routes, round_.escapeState().freeTiles,
+                  round_.yieldingCars());                                   line(buf);
     line("F1 BOX F2 NAV F3 TGT F4 XY");
     line("F5 RADAR F6 FUEL F7 FREEZE");
     line("F8 FLAGS F9 RESTART");

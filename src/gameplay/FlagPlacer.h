@@ -35,5 +35,11 @@ struct Request {
 // The same seed always produces the same layout.
 std::vector<FlagSpawn> place(const Request& req, uint32_t seed);
 
+// The placement rule on its own: `count` reachable, well-spread road tiles
+// that clear the spawn and avoid everything in `reserved`.  place() is built
+// on it, and so is the turbo scatter -- a power-up has to be as fair to reach
+// as a flag, so it must not get a second, looser set of rules.
+std::vector<TileSpawn> pickTiles(const Request& req, int count, uint32_t seed);
+
 } // namespace FlagPlacer
 } // namespace rx

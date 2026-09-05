@@ -47,14 +47,12 @@ std::vector<int> reachableDistances(const TileMap& map, const TileSpawn& from) {
 
 } // namespace
 
-std::vector<FlagSpawn> place(const Request& req, uint32_t seed) {
-    std::vector<FlagSpawn> out;
-    if (!req.map) return out;
+std::vector<TileSpawn> pickTiles(const Request& req, int wanted, uint32_t seed) {
+    std::vector<TileSpawn> chosen;
+    if (!req.map || wanted <= 0) return chosen;
 
     const TileMap& map = *req.map;
     const int w = map.width(), h = map.height();
-    const int wanted = req.normal + req.special + req.lucky;
-    if (wanted <= 0) return out;
 
     const std::vector<int> dist = reachableDistances(map, req.playerSpawn);
 
@@ -73,7 +71,7 @@ std::vector<FlagSpawn> place(const Request& req, uint32_t seed) {
             if (!blocked) pool.push_back(t);
         }
     }
-    if (pool.empty()) return out;
+    if (pool.empty()) return chosen;
 
     uint32_t rng = seed ? seed : 1u;
     for (size_t i = pool.size(); i > 1; --i)
@@ -81,7 +79,6 @@ std::vector<FlagSpawn> place(const Request& req, uint32_t seed) {
 
     // Take spread-out tiles first, easing the spacing only if the maze cannot
     // supply enough at the ideal separation.
-    std::vector<TileSpawn> chosen;
     for (int separation = MIN_SEPARATION; separation >= 0 && static_cast<int>(chosen.size()) < wanted;
          --separation) {
         for (const auto& c : pool) {
@@ -92,6 +89,13 @@ std::vector<FlagSpawn> place(const Request& req, uint32_t seed) {
             if (ok) chosen.push_back(c);
         }
     }
+    return chosen;
+}
+
+std::vector<FlagSpawn> place(const Request& req, uint32_t seed) {
+    std::vector<FlagSpawn> out;
+    const int wanted = req.normal + req.special + req.lucky;
+    const std::vector<TileSpawn> chosen = pickTiles(req, wanted, seed);
 
     // Normal flags first, then the two bonus flags, so a short maze still gets
     // a full objective before it gets extras.

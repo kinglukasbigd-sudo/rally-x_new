@@ -48,6 +48,7 @@ void HUD::drawPanel(Renderer& r, const HudInfo& info) const {
         r.textCentered(cx, RADAR_Y + RADAR_H + 28, "SPECIAL X2", pal::FlagSpecial);
 
     drawFuelGauge(r, info);
+    drawTurboGauge(r, info);
     drawLives(r, info);
 }
 
@@ -65,6 +66,20 @@ void HUD::drawFuelGauge(Renderer& r, const HudInfo& info) const {
     const int fill = static_cast<int>(frac * (w - 2));
     if (fill > 0)
         r.fillRect(x + 1, y + 1, fill, h - 2, frac < 0.25f ? pal::FuelLow : pal::FuelHigh);
+}
+
+void HUD::drawTurboGauge(Renderer& r, const HudInfo& info) const {
+    // Only on screen while a boost is running: an empty gauge sitting there
+    // through rounds 1-4, which have no turbos at all, would be clutter.
+    if (info.turboFraction <= 0.f) return;
+
+    const int x = PANEL_X + 8;
+    const int y = SCREEN_H - 34;
+    const int w = PANEL_W - 16;
+
+    r.text(x, y - 7, "TURBO", pal::Turbo);
+    const int fill = static_cast<int>(std::clamp(info.turboFraction, 0.f, 1.f) * w);
+    if (fill > 0) r.fillRect(x, y + 1, fill, 3, pal::Turbo);
 }
 
 void HUD::drawLives(Renderer& r, const HudInfo& info) const {

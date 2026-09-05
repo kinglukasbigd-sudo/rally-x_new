@@ -21,6 +21,10 @@ struct LevelData {
     std::string name       = "ROUND";
     RoundType   type       = RoundType::Normal;
     int         difficulty = 1;
+    // The round the player is actually on, counting from 1 and never wrapping.
+    // `difficulty` restarts with each lap through the authored levels; this
+    // does not, which is what the level-gated features are keyed on.
+    int         levelNumber = 1;
     float       fuel       = 100.f;   // tank capacity
     float       fuelDrain  = 1.0f;    // units per second while driving
     float       playerSpeed = 1.35f;

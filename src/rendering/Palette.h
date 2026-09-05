@@ -28,6 +28,9 @@ constexpr Color FlagLucky  {248, 108, 200, 255};
 constexpr Color Rock       {172, 132,  72, 255};
 constexpr Color RockDark   {104,  76,  36, 255};
 
+constexpr Color Turbo      { 64, 232, 232, 255};
+constexpr Color TurboDark  { 16, 120, 140, 255};
+
 constexpr Color Smoke      {224, 224, 224, 255};
 constexpr Color SmokeDark  {148, 148, 148, 255};
 

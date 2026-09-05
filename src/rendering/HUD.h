@@ -17,6 +17,7 @@ struct HudInfo {
     int   flagsRemaining = 0;
     int   multiplier     = 1;
     bool  challenge      = false;
+    float turboFraction  = 0.f;   // 0 when no boost is running
 };
 
 // Classic arcade instrumentation only: score strip along the top, radar and
@@ -29,6 +30,7 @@ private:
     void drawScoreStrip(Renderer& r, const HudInfo& info) const;
     void drawPanel(Renderer& r, const HudInfo& info) const;
     void drawFuelGauge(Renderer& r, const HudInfo& info) const;
+    void drawTurboGauge(Renderer& r, const HudInfo& info) const;
     void drawLives(Renderer& r, const HudInfo& info) const;
 };
 

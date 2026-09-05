@@ -82,6 +82,36 @@ const char* ROCK_ART[12] = {
     "            ",
 };
 
+const char* TURBO_ART[12] = {
+    "            ",
+    "     11     ",
+    "    1221    ",
+    "   122221   ",
+    "  12222221  ",
+    "   111111   ",
+    "     11     ",
+    "    1221    ",
+    "   122221   ",
+    "  12222221  ",
+    "   111111   ",
+    "            ",
+};
+
+const char* TURBO_ART_BRIGHT[12] = {
+    "     11     ",
+    "    1221    ",
+    "   122221   ",
+    "  12222221  ",
+    " 1222222221 ",
+    "  11111111  ",
+    "    1221    ",
+    "   122221   ",
+    "  12222221  ",
+    " 1222222221 ",
+    "  11111111  ",
+    "            ",
+};
+
 const char* SMOKE_SMALL[16] = {
     "                ",
     "                ",
@@ -158,6 +188,10 @@ void SpriteRenderer::create(Renderer& r) {
     const Color rockPal[2] = { pal::Rock, pal::RockDark };
     rock_ = r.createSprite(12, 12, ROCK_ART, rockPal, 2);
 
+    const Color turboPal[2] = { pal::TurboDark, pal::Turbo };
+    turbo_[0] = r.createSprite(12, 12, TURBO_ART,        turboPal, 2);
+    turbo_[1] = r.createSprite(12, 12, TURBO_ART_BRIGHT, turboPal, 2);
+
     const Color smokePal[2] = { pal::Smoke, pal::SmokeDark };
     smoke_[0] = r.createSprite(16, 16, SMOKE_SMALL, smokePal, 2);
     smoke_[1] = r.createSprite(16, 16, SMOKE_LARGE, smokePal, 2);
@@ -169,6 +203,7 @@ void SpriteRenderer::destroy(Renderer& r) {
     r.destroySprite(carStunned_);
     for (auto& s : flag_)      r.destroySprite(s);
     r.destroySprite(rock_);
+    for (auto& s : turbo_)     r.destroySprite(s);
     for (auto& s : smoke_)     r.destroySprite(s);
 }
 
@@ -241,6 +276,15 @@ void SpriteRenderer::drawRock(Renderer& r, const Camera& cam, const Vec2& world)
     const int sx = VIEW_X + static_cast<int>(cam.toScreenX(world.x));
     const int sy = VIEW_Y + static_cast<int>(cam.toScreenY(world.y));
     r.drawCentered(rock_, sx, sy);
+}
+
+void SpriteRenderer::drawTurbo(Renderer& r, const Camera& cam, const Vec2& world,
+                               int tick) const {
+    const int sx = VIEW_X + static_cast<int>(cam.toScreenX(world.x));
+    const int sy = VIEW_Y + static_cast<int>(cam.toScreenY(world.y));
+    // Two frames, alternating a few times a second: enough motion to catch the
+    // eye across the maze without anything as soft as a fade.
+    r.drawCentered(turbo_[(tick / 10) % 2], sx, sy);
 }
 
 void SpriteRenderer::drawSmoke(Renderer& r, const Camera& cam, const Vec2& world,

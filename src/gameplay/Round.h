@@ -5,12 +5,14 @@
 #include "entities/Player.h"
 #include "entities/Flag.h"
 #include "entities/Rock.h"
+#include "entities/Turbo.h"
 #include "entities/Enemy.h"
 #include "gameplay/FuelSystem.h"
 #include "gameplay/SmokeSystem.h"
 #include "ai/NavigationGraph.h"
 #include "ai/EnemyAI.h"
 #include "gameplay/FlagPlacer.h"
+#include "gameplay/TurboSystem.h"
 #include <vector>
 
 namespace rx {
@@ -30,6 +32,10 @@ public:
     // speed, which is not a chase the player is meant to win.
     static constexpr float CHASE_SPEED_MULTIPLE = 2.0f;
 
+    // From this round on, the rocks stop sitting still.  Below it they behave
+    // exactly as they always have.
+    static constexpr int   MOVING_ROCK_LEVEL = 10;
+
     struct Events {
         bool       playerDied    = false;
         bool       roundComplete = false;
@@ -40,6 +46,7 @@ public:
         bool       specialTaken  = false;
         bool       luckyTaken    = false;
         bool       smokePuffed   = false;
+        bool       turboTaken    = false;   // a boost was picked up this step
         bool       chaseStarted  = false;   // challenging stage: fuel ran out
     };
 
@@ -71,6 +78,8 @@ public:
 
     const std::vector<Flag>& flags() const { return flags_; }
     const std::vector<Rock>&  rocks()   const { return rocks_; }
+    const std::vector<Turbo>& turbos()  const { return turbos_; }
+    const TurboSystem&        turbo()   const { return turbo_; }
     const std::vector<Enemy>& enemies() const { return enemies_; }
     const NavigationGraph&    nav()     const { return nav_; }
 
@@ -85,6 +94,14 @@ public:
 
     bool isChallenge() const { return level_.type == RoundType::Challenge; }
 
+    // True when this round's rocks patrol rather than sit.
+    bool rocksMove() const { return level_.levelNumber >= MOVING_ROCK_LEVEL; }
+
+    // The escape picture the pursuit AI is currently working from -- what it
+    // believes the player's way out is.  Exposed for the debug overlay.
+    const EscapeAnalyzer::Result& escapeState() const { return ai_.escape(); }
+    int  yieldingCars() const { return ai_.yieldingCars(); }
+
     // True once a challenging stage's tank has emptied and the cars are loose.
     bool chaseActive() const { return chaseActive_; }
 
@@ -94,6 +111,11 @@ public:
 
 private:
     void collectFlags(ScoreSystem& score, Events& ev);
+    void collectTurbos(Events& ev);
+    // Pushes the current boost state onto the car.  Called before the car
+    // moves and again after a pickup, so the speed is never a frame stale.
+    void applyPlayerSpeed();
+    void updateRocks();
     void checkRocks(Events& ev);
     void checkEnemies(Events& ev);
     void spawnEnemies();
@@ -102,12 +124,16 @@ private:
     void buildEnemyMap();
     void resetActors();
     void placeFlags();
+    void placeTurbos();
+    void assignRockPatrols();
     Vec2 smokeEmitPoint() const;
 
     LevelData         level_;
     Player            player_;
     std::vector<Flag> flags_;
     std::vector<Rock>  rocks_;
+    std::vector<Turbo> turbos_;
+    TurboSystem        turbo_;
     std::vector<Enemy> enemies_;
     TileMap            enemyMap_;
     NavigationGraph    nav_;

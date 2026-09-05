@@ -29,6 +29,9 @@ public:
                    int themeIndex) const;
     void drawFlag(Renderer& r, const Camera& cam, const Flag& f) const;
     void drawRock(Renderer& r, const Camera& cam, const Vec2& world) const;
+    // The boost pickup: a chevron, drawn with a slow pulse so it reads as a
+    // power-up rather than another flag.
+    void drawTurbo(Renderer& r, const Camera& cam, const Vec2& world, int tick) const;
     void drawSmoke(Renderer& r, const Camera& cam, const Vec2& world,
                    float lifeFraction) const;
 
@@ -45,6 +48,7 @@ private:
     Sprite carStunned_{};
     Sprite flag_[3]{};
     Sprite rock_{};
+    Sprite turbo_[2]{};
     Sprite smoke_[2]{};
 };
 

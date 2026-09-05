@@ -20,13 +20,22 @@ constexpr float ENEMY_LAUNCH_DELAY = 1.4f;
 // alarm registers and the player is not killed on the very frame the cars
 // appear, which is what happens if they were standing near the pen.
 constexpr float CHASE_LAUNCH_DELAY = 0.5f;
+
+// --- moving rocks (round 10+) ---------------------------------------------
+// Slow enough to read.  At 0.30 px/step a rock crosses a tile in about nine
+// tenths of a second, against a player covering it in a fifth: the rock is
+// always something to be driven around, never something that lands on you.
+constexpr float ROCK_PATROL_SPEED = 0.30f;
+// How far either side of home a rock may wander.  Two tiles is enough to
+// close and reopen a corridor mouth without a rock ever becoming a wall you
+// have to memorise the whole length of.
+constexpr int   ROCK_PATROL_REACH = 2;
 }
 
 void Round::load(const LevelData& level, uint32_t flagSeed) {
     level_ = level;
     flagSeed_ = flagSeed;
     camera_.setViewport(VIEW_W, VIEW_H);
-    buildEnemyMap();
     // The navigation graph describes the maze, not the rocks: a car routes as
     // if the corridors were clear and finds out about a rock by hitting it.
     nav_.build(level_.map);
@@ -34,10 +43,12 @@ void Round::load(const LevelData& level, uint32_t flagSeed) {
 }
 
 void Round::buildEnemyMap() {
-    // Start from the maze, then close off every rock tile.
+    // Start from the maze, then close off wherever the rocks currently are.
+    // Once the rocks patrol this has to be rebuilt as they slide, which is why
+    // it reads the live rocks rather than the level's authored list.
     enemyMap_ = level_.map;
-    for (const auto& rs : level_.rocks)
-        enemyMap_.set(rs.tx, rs.ty, Tile::Wall);
+    for (const auto& r : rocks_)
+        enemyMap_.set(TileMap::toTile(r.pos.x), TileMap::toTile(r.pos.y), Tile::Wall);
 }
 
 void Round::placeCarsInPen(float speed, float delay) {
@@ -100,11 +111,16 @@ void Round::startChallengeChase() {
     EnemyAI::Tuning t;
     t.pathfindRangeTiles = MAP_W + MAP_H;   // route properly from anywhere
     t.randomTurnChance   = 0.02f;           // and barely wander
+    // The fairness rule is deliberately off here.  Everywhere else the pack
+    // must leave a way out; this chase is the stage's closing bell and is
+    // meant to be lost.  Policing it would quietly undo the whole feature.
+    t.antiTrap           = false;
     ai_.reset(0xC0FFEEu ^ static_cast<uint32_t>(level_.difficulty * 40503u), t);
 }
 
 void Round::restart() {
     placeFlags();
+    placeTurbos();
     resetActors();
 }
 
@@ -156,6 +172,118 @@ void Round::placeFlags() {
     }
 }
 
+void Round::placeTurbos() {
+    turbos_.clear();
+
+    const int wanted = TurboRules::countForLevel(level_.levelNumber);
+    if (wanted <= 0) return;                  // rounds 1-4 have none at all
+
+    // Turbos go through the flag placer, so they inherit its fairness rules
+    // wholesale: reachable road only, clear of the spawn, spread out, and
+    // never on top of a rock, the pen or a flag.
+    FlagPlacer::Request req;
+    req.map         = &level_.map;
+    req.playerSpawn = level_.playerSpawn;
+    req.reserved    = level_.rocks;
+    req.reserved.insert(req.reserved.end(),
+                        level_.enemyPen.begin(), level_.enemyPen.end());
+    for (const auto& f : flags_)
+        req.reserved.push_back({ TileMap::toTile(f.pos.x), TileMap::toTile(f.pos.y) });
+
+    // A seed of its own, derived from the flag seed, so the boosts move with
+    // the flags each round instead of landing in the same places every time.
+    const uint32_t seed = (flagSeed_ ? flagSeed_ : 0x51ED51EDu) * 2246822519u + 0x9E3779B9u;
+
+    for (const auto& t : FlagPlacer::pickTiles(req, wanted, seed))
+        turbos_.push_back(Turbo{ Maze::tileCenterWorld(t.tx, t.ty), false });
+}
+
+void Round::assignRockPatrols() {
+    if (!rocksMove()) return;
+
+    const TileMap& m = level_.map;
+
+    // The fairness guarantee.  A rock is lethal, so for the player it is a
+    // wall wherever it happens to be; if a patrol could put one in a corridor
+    // that is the only way through, the maze would come apart underneath the
+    // player.  So a tile only joins a patrol if sealing it -- together with
+    // every tile already claimed -- leaves the whole maze still connected.
+    // Because the check is cumulative, no combination of rock positions can
+    // ever cut the map in two.
+    std::vector<TileSpawn> sealed;
+    for (const auto& rs : level_.rocks) sealed.push_back(rs);
+
+    // Tiles a rock may never slide onto: the player's spawn, the pen, and any
+    // tile already claimed -- which covers both the other rocks' homes and the
+    // stretches they have already taken, so two beats can never overlap.
+    auto occupied = [&](int tx, int ty) {
+        if (tx == level_.playerSpawn.tx && ty == level_.playerSpawn.ty) return true;
+        for (const auto& p : level_.enemyPen) if (p.tx == tx && p.ty == ty) return true;
+        for (const auto& t : sealed)          if (t.tx == tx && t.ty == ty) return true;
+        return false;
+    };
+
+    auto stillConnected = [&](int tx, int ty) {
+        std::vector<char> blocked(static_cast<size_t>(m.width()) * m.height(), 0);
+        for (const auto& t : sealed) blocked[static_cast<size_t>(t.ty) * m.width() + t.tx] = 1;
+        blocked[static_cast<size_t>(ty) * m.width() + tx] = 1;
+
+        int open = 0, start = -1;
+        for (int y = 0; y < m.height(); ++y)
+            for (int x = 0; x < m.width(); ++x) {
+                const size_t i = static_cast<size_t>(y) * m.width() + x;
+                if (m.isRoad(x, y) && !blocked[i]) { ++open; if (start < 0) start = static_cast<int>(i); }
+            }
+        if (start < 0) return false;
+
+        std::vector<char> seen(blocked.size(), 0);
+        std::vector<int>  queue{ start };
+        seen[static_cast<size_t>(start)] = 1;
+        for (size_t head = 0; head < queue.size(); ++head) {
+            const int x = queue[head] % m.width(), y = queue[head] / m.width();
+            for (Direction d : { Direction::Up, Direction::Down, Direction::Left, Direction::Right }) {
+                const int nx = x + dirDX(d), ny = y + dirDY(d);
+                if (nx < 0 || ny < 0 || nx >= m.width() || ny >= m.height()) continue;
+                const size_t n = static_cast<size_t>(ny) * m.width() + nx;
+                if (seen[n] || blocked[n] || !m.isRoad(nx, ny)) continue;
+                seen[n] = 1;
+                queue.push_back(static_cast<int>(n));
+            }
+        }
+        return static_cast<int>(queue.size()) == open;
+    };
+
+    for (auto& rock : rocks_) {
+        const int tx = TileMap::toTile(rock.pos.x);
+        const int ty = TileMap::toTile(rock.pos.y);
+
+        // Grow the beat outwards a tile at a time, stopping at the first tile
+        // that is walled, taken, or would cut the maze.
+        int left = 0, right = 0;
+        for (int k = 1; k <= ROCK_PATROL_REACH; ++k) {
+            const int nx = tx - k;
+            if (!m.isRoad(nx, ty) || occupied(nx, ty) || !stillConnected(nx, ty)) break;
+            sealed.push_back({ nx, ty });
+            left = k;
+        }
+        for (int k = 1; k <= ROCK_PATROL_REACH; ++k) {
+            const int nx = tx + k;
+            if (!m.isRoad(nx, ty) || occupied(nx, ty) || !stillConnected(nx, ty)) break;
+            sealed.push_back({ nx, ty });
+            right = k;
+        }
+
+        if (left == 0 && right == 0) continue;      // nowhere to go: stays put
+
+        rock.minX  = Maze::tileCenterWorld(tx - left,  ty).x;
+        rock.maxX  = Maze::tileCenterWorld(tx + right, ty).x;
+        rock.speed = ROCK_PATROL_SPEED;
+        // Start whichever way there is more room, so a lopsided beat opens
+        // with the longer half.
+        rock.dirX  = (right >= left) ? 1 : -1;
+    }
+}
+
 void Round::restartAfterDeath() {
     // Everything that moves goes back to its starting place; the flags do not.
     resetActors();
@@ -163,9 +291,16 @@ void Round::restartAfterDeath() {
 
 void Round::resetActors() {
     rocks_.clear();
-    for (const auto& rs : level_.rocks)
-        rocks_.push_back(Rock{ Maze::tileCenterWorld(rs.tx, rs.ty) });
+    for (const auto& rs : level_.rocks) {
+        Rock r;
+        r.pos = Maze::tileCenterWorld(rs.tx, rs.ty);
+        r.minX = r.maxX = r.pos.x;              // stationary until told otherwise
+        rocks_.push_back(r);
+    }
+    assignRockPatrols();
+    buildEnemyMap();                            // the rocks are back home
 
+    turbo_.reset();                             // a new car starts unboosted
     smoke_.reset();
     fuel_.reset(level_.fuel, level_.fuelDrain);   // a new car has a full tank
     chaseActive_ = false;
@@ -193,7 +328,13 @@ Round::Events Round::update(const InputManager& input, ScoreSystem& score, float
 
     fuel_.update(dt);
 
+    // The boost is a speed, not a movement mode: the car still turns on the
+    // grid and still stops at walls, it just covers ground faster.
+    turbo_.update(dt);
+    applyPlayerSpeed();
     player_.update(map(), input.desiredDirection(), dt);
+
+    updateRocks();
 
     EnemyAI::Context ctx;
     ctx.map         = &enemyMap_;   // where a car may go
@@ -201,11 +342,13 @@ Round::Events Round::update(const InputManager& input, ScoreSystem& score, float
     ctx.nav         = &nav_;
     ctx.smoke       = &smoke_;
     ctx.playerPos   = player_.position();
+    ctx.playerSpeed = player_.speed();
     ctx.playerAlive = player_.alive();
     ctx.frozen      = enemiesFrozen_;
     ai_.update(enemies_, ctx, dt);
 
     collectFlags(score, ev);
+    collectTurbos(ev);
     checkRocks(ev);
     if (!ev.playerDied) checkEnemies(ev);
 
@@ -259,6 +402,38 @@ void Round::collectFlags(ScoreSystem& score, Events& ev) {
         }
     }
     if (collected_ >= required_ && required_ > 0) ev.roundComplete = true;
+}
+
+void Round::applyPlayerSpeed() {
+    player_.setSpeed(turbo_.speedFor(level_.playerSpeed));
+}
+
+void Round::collectTurbos(Events& ev) {
+    for (auto& t : turbos_) {
+        if (t.collected) continue;
+        if (!CollisionSystem::circlesOverlap(player_.position(), t.pos,
+                                             TurboRules::PICKUP_RADIUS))
+            continue;
+        t.collected = true;
+        turbo_.activate();
+        applyPlayerSpeed();
+        ev.turboTaken = true;
+    }
+}
+
+void Round::updateRocks() {
+    if (!rocksMove()) return;
+
+    bool anyMoved = false;
+    for (auto& r : rocks_) {
+        if (!r.moving()) continue;
+        const int before = TileMap::toTile(r.pos.x);
+        r.step();
+        if (TileMap::toTile(r.pos.x) != before) anyMoved = true;
+    }
+    // The pursuit cars treat rocks as solid, so their map has to follow the
+    // rocks around -- and so does the escape analysis built on top of it.
+    if (anyMoved) buildEnemyMap();
 }
 
 void Round::checkRocks(Events& ev) {

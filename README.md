@@ -199,10 +199,10 @@ src/
   core/        Game (state machine + fixed-step loop), InputManager, TouchControls,
                FileSystem, Types, Debug
   world/       TileMap, Maze, LevelLoader, Camera, CollisionSystem
-  entities/    Player, Enemy, Flag, Rock, SmokeCloud
-  ai/          NavigationGraph, Pathfinding, EnemyAI
+  entities/    Player, Enemy, Flag, Rock, Turbo, SmokeCloud
+  ai/          NavigationGraph, Pathfinding, EnemyAI, EscapeAnalyzer
   gameplay/    Round, ScoreSystem, FuelSystem, LifeSystem, SmokeSystem,
-               ChallengeStage, LuckyFlagBonusCalculator, FlagPlacer
+               ChallengeStage, LuckyFlagBonusCalculator, FlagPlacer, TurboSystem
   rendering/   Renderer, SpriteRenderer, HUD, Radar, Palette, Font, RoundTheme
   audio/       AudioManager (synth effects + music mixer)
 levels/        level01..level12.lvl  (external data, no maze is hard-coded)
@@ -210,7 +210,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         172 gameplay tests, run with `make test`
+tests/         215 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -408,3 +408,20 @@ gameplay code. The judgement calls made for this phase:
   properly through the maze once inside about a dozen tiles, with a small random turn
   chance so the pack does not converge into single file. Deliberately shallow: no
   prediction, no coordination, no flanking.
+- **Escape guarantee** — requested house rule, not original: the pack may corner the player
+  but may not seal them in. `EscapeAnalyzer` races the player against every car over the
+  maze and reports how many directions open into space the player would reach first;
+  `EnemyAI` refuses a move that would close the last one, and pulls the responsible car off
+  for 1.4s if the player is already boxed. Measured over the shipped levels the check
+  changes a car's mind in 0–11% of frames, so the pursuit is otherwise untouched. It is
+  deliberately **off** during a challenging stage's closing chase, which is meant to be
+  lost. See `EscapeAnalyzer::MIN_ROUTE_TILES` and `EnemyAI::Tuning::antiTrap`.
+- **Turbo** — requested house rule, not original: pickups scattered by the same placer as
+  the flags give a 4-second boost to 1.35x speed. None in rounds 1–4, two in 5–7, three in
+  8–10, five from 11 on (`TurboRules::countForLevel`). It is a speed and nothing else — the
+  car still turns on the grid and still stops at walls.
+- **Moving rocks** — requested house rule, not original: from round 10 each rock patrols up
+  to two tiles left and right of where it started, slowly enough to drive around
+  (`Round::ROCK_PATROL_SPEED`, one tile per ~0.9s against the player's ~0.2s). A tile only
+  joins a patrol if sealing it, together with every tile already claimed, leaves the maze
+  connected — so no combination of rock positions can ever cut the map in two.

@@ -35,6 +35,13 @@ void Radar::draw(Renderer& r, const Round& round, int blinkTick, bool showMaze,
         blip(r, f.pos, c, 2);
     }
 
+    // Boosts show on the radar like objectives do -- knowing where the next
+    // one is is half of using it.
+    for (const auto& t : round.turbos()) {
+        if (t.collected) continue;
+        blip(r, t.pos, pal::Turbo, 2);
+    }
+
     for (const auto& e : round.enemies()) {
         if (!e.onTrack()) continue;
         blip(r, e.position(), e.stunned() ? pal::TextDim : theme.enemyBody, 2);
