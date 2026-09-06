@@ -521,3 +521,60 @@ TEST(a_missing_or_empty_old_location_is_simply_a_fresh_start) {
     CHECK(db.highScores().empty());
     CHECK_STR(db.playerName(), ScoreRules::DEFAULT_NAME);
 }
+
+TEST(a_migration_is_not_forfeited_by_an_empty_file_already_being_there) {
+    // The failure this guards against actually happened.  The first launch
+    // after the rename creates an empty database; if the migration keys on the
+    // file being absent rather than the table being empty, that one launch
+    // burns its only chance and the old scores are stranded for good.
+    Scratch legacy("retry-src");
+    Scratch fresh("retry-dst");
+
+    {   // A launch that found nothing to migrate, and left an empty file.
+        ScoreStore first;
+        CHECK(first.open(fresh.path, "build/nothing-here-yet.dat"));
+        CHECK(!first.migrated());
+        CHECK(first.highScores().empty());
+    }
+    {   // The old table turns up afterwards -- restored from a backup, or
+        // simply looked for in the right place this time.
+        ScoreStore old;
+        CHECK(old.open(legacy.path));
+        old.setPlayerName("IVAN");
+        old.recordRun(makeRun("IVAN", 128450, 14, 100));
+    }
+
+    ScoreStore db;
+    CHECK(db.open(fresh.path, legacy.path));
+    CHECK(db.migrated());                       // still adopted, not stranded
+    CHECK_EQ(static_cast<int>(db.highScores().size()), 1);
+    CHECK_EQ(db.highScores()[0].score, 128450);
+    CHECK_STR(db.playerName(), "IVAN");
+
+    // And once there is something of its own, the old table is left alone.
+    ScoreStore again;
+    CHECK(again.open(fresh.path, legacy.path));
+    CHECK(!again.migrated());
+    CHECK_EQ(static_cast<int>(again.highScores().size()), 1);
+}
+
+TEST(an_untouched_database_is_not_rewritten_on_every_launch) {
+    // Opening is a read.  Rewriting the file just to open it would put every
+    // launch one power cut away from a table it had no reason to touch.
+    Scratch s("nowrite");
+    {
+        ScoreStore db;
+        CHECK(db.open(s.path));
+        db.recordRun(makeRun("IVAN", 4200, 3, 900));
+    }
+    const std::string before = [&] {
+        std::string t; FileSystem::readTextFile(s.path, t); return t;
+    }();
+
+    ScoreStore db;
+    CHECK(db.open(s.path));
+    CHECK(!db.migrated());
+    std::string after;
+    CHECK(FileSystem::readTextFile(s.path, after));
+    CHECK_STR(after, before);
+}

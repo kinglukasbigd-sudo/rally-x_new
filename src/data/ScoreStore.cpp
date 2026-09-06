@@ -193,26 +193,38 @@ bool ScoreStore::open(const std::string& path, const std::string& legacyPath) {
     clear();
 
     std::string text;
-    if (FileSystem::readTextFile(path_, text)) {
-        parse(text);
-        ready_ = true;
+    const bool haveOwn = FileSystem::readTextFile(path_, text);
+    if (haveOwn) parse(text);
+
+    // Look for a table written by a build from before the project was renamed
+    // and adopt it wholesale -- scores, runs, player name and all.  The old
+    // file is left exactly where it is: this copies, it does not move.
+    //
+    // The test is that this database is *empty*, not that its file is missing.
+    // Those are not the same thing, and the difference is the whole migration:
+    // the first launch after a rename creates an empty file, so keying on the
+    // file's absence gives the migration exactly one chance and silently
+    // forfeits it if that launch happened before the player restored a backup,
+    // or with anything else amiss.  An empty table has nothing to lose, so
+    // adopting into one is always safe and can be retried for as long as it
+    // is needed.
+    if (scores_.empty() && runs_.empty() &&
+        !legacyPath.empty() && legacyPath != path_) {
+        std::string legacy;
+        if (FileSystem::readTextFile(legacyPath, legacy)) {
+            parse(legacy);
+            migrated_ = !scores_.empty() || !runs_.empty();
+        }
+    }
+
+    if (haveOwn && !migrated_) {
+        ready_ = true;      // nothing to write: what is on disk is current
         return true;
     }
 
-    // Nothing here yet.  Before starting empty, look for a table written by a
-    // build from before the project was renamed and adopt it wholesale --
-    // scores, runs, player name and all.  The old file is left exactly where
-    // it is: this copies, it does not move.
-    if (!legacyPath.empty() && legacyPath != path_ &&
-        FileSystem::readTextFile(legacyPath, text)) {
-        parse(text);
-        migrated_ = !scores_.empty() || !runs_.empty() ||
-                    playerName_ != ScoreRules::DEFAULT_NAME;
-    }
-
-    // Lay down the database either way, so the very first run has somewhere to
-    // go and so a permissions problem shows up now rather than at the end of
-    // somebody's best game.
+    // Lay the database down, so the very first run has somewhere to go and so
+    // a permissions problem shows up now rather than at the end of somebody's
+    // best game.
     ready_ = save();
     return ready_;
 }
