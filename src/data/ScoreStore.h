@@ -64,7 +64,16 @@ public:
     // fails hard: a database that cannot be read leaves an empty table and the
     // game starts anyway, which is the whole point of keeping it out of the
     // gameplay path.
-    bool open(const std::string& path);
+    //
+    // `legacyPath`, when given, is a database written by an older build under
+    // the project's previous name.  It is read only when there is nothing at
+    // `path` yet, and it is never modified or removed -- a rename must not
+    // cost anybody their scores, and it must not destroy the old copy either
+    // in case the migration itself goes wrong.
+    bool open(const std::string& path, const std::string& legacyPath = "");
+
+    // True when this session's table was carried over from the old location.
+    bool migrated() const { return migrated_; }
 
     // True when the file was read or created successfully.  False means the
     // game is running with scores it will not be able to keep.
@@ -118,8 +127,9 @@ private:
     std::string                  playerName_ = ScoreRules::DEFAULT_NAME;
     std::vector<HighScoreRecord> scores_;
     std::vector<RunRecord>       runs_;
-    uint64_t                     nextId_ = 1;
-    bool                         ready_  = false;
+    uint64_t                     nextId_  = 1;
+    bool                         ready_   = false;
+    bool                         migrated_ = false;
 };
 
 } // namespace rx

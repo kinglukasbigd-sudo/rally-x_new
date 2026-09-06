@@ -1,6 +1,8 @@
-# New Rally-X — Phase 1
+# Dakar X
 
-A clean-room reconstruction of the 1981 Namco arcade game *New Rally-X*, in C++17 and SDL2.
+A clean-room arcade maze game in C++17 and SDL2, reconstructing the mechanics of the
+1981 Namco arcade game *New Rally-X* from scratch. No original code, art, audio or
+data is used or included; the name above is this project's own.
 
 The goal of Phase 1 is faithfulness, not reinterpretation: a title screen, the maze, the
 flags, the fuel, the smoke screen, the pursuing cars and the radar, behaving the way the
@@ -211,7 +213,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         259 gameplay tests, run with `make test`
+tests/         262 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -283,8 +285,8 @@ packed into the APK, and never published.
 
 | Platform | Put `music_normal.wav` / `music_challenge.wav` here |
 | --- | --- |
-| Linux | `~/.local/share/newrallyx/music/` (or `$XDG_DATA_HOME/newrallyx/music/`) |
-| Android | `Android/data/com.cleanroom.newrallyx/files/music/` |
+| Linux | `~/.local/share/dakarx/music/` (or `$XDG_DATA_HOME/dakarx/music/`) |
+| Android | `Android/data/com.cleanroom.dakarx/files/music/` |
 | Either | a `music/` folder beside the game |
 
 The game creates that folder on first run and logs the exact path, along with every path it
@@ -297,11 +299,11 @@ Files must be WAV. Build them from anything with the tools below, which write st
 that folder:
 
 ```bash
-tools/find_loop.py song.mp3 ~/.local/share/newrallyx/music/music_normal.wav --from=0 --to=50
+tools/find_loop.py song.mp3 ~/.local/share/dakarx/music/music_normal.wav --from=0 --to=50
 ```
 
 ```bash
-adb push ~/.local/share/newrallyx/music/music_normal.wav /sdcard/Android/data/com.cleanroom.newrallyx/files/music/
+adb push ~/.local/share/dakarx/music/music_normal.wav /sdcard/Android/data/com.cleanroom.dakarx/files/music/
 ```
 
 Only use music you have the rights to. The clean-room statement covers this project's own

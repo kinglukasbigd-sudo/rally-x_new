@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--capture-frames") == 0 && i + 1 < argc) captureFrames = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--capture-every") == 0 && i + 1 < argc) captureEvery = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--help") == 0) {
-            std::printf("New Rally-X (clean-room reconstruction)\n"
+            std::printf("Dakar X (clean-room reconstruction)\n"
                         "  --scale N   window scale factor (default 3)\n"
                         "  --data DIR  level data directory (default levels)\n"
                         "  --touch       enable touch controls (always on for Android)\n"

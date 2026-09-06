@@ -50,8 +50,8 @@ Direction Player::chooseEscapeDirection(const TileMap& map) {
 void Player::update(const TileMap& map, Direction desired, float dt) {
     if (!alive_) return;
 
-    // In Rally-X the car is always rolling; releasing the stick simply keeps
-    // it going the way it was already pointed.
+    // As in the arcade original the car is always rolling; releasing the
+    // stick simply keeps it going the way it was already pointed.
     auto res = CollisionSystem::step(map, pos_, dir_, desired, speed_);
 
     // House rule: a wall redirects the car instead of parking it.  Steering

@@ -48,7 +48,7 @@ const char* kPocket =
     "##############\n";
 
 // A ring: one loop of corridor around a solid block, which is the shape
-// Rally-X mazes are actually built from.  Two cars can pincer a player here,
+// this game's mazes are actually built from.  Two cars can pincer a player here,
 // but there is always somewhere for one of them to give way to -- unlike a
 // blind corridor, where being cornered is the maze's doing and not the AI's.
 const char* kRing =

@@ -451,3 +451,73 @@ TEST(entry_starts_from_the_name_already_on_file) {
     // Confirming an empty field still files something legible.
     CHECK_STR(e.result(), ScoreRules::DEFAULT_NAME);
 }
+
+// --- carrying the table across the rename ---------------------------------
+
+TEST(a_table_written_under_the_old_name_is_adopted_not_lost) {
+    // The migration the project rename needed: everything a player had before
+    // has to still be there afterwards.
+    Scratch legacy("legacy-src");
+    Scratch fresh("legacy-dst");
+
+    {   // What the old build left behind.
+        ScoreStore old;
+        CHECK(old.open(legacy.path));
+        old.setPlayerName("IVAN");
+        old.recordRun(makeRun("IVAN", 128450, 14, 100));
+        old.recordRun(makeRun("ALEX",  91200, 10, 200));
+    }
+
+    // The renamed build starting for the first time: nothing of its own yet.
+    ScoreStore db;
+    CHECK(db.open(fresh.path, legacy.path));
+    CHECK(db.migrated());
+    CHECK_EQ(static_cast<int>(db.highScores().size()), 2);
+    CHECK_EQ(db.highScores()[0].score, 128450);
+    CHECK_STR(db.highScores()[0].playerName, "IVAN");
+    CHECK_EQ(static_cast<int>(db.runs().size()), 2);
+    CHECK_STR(db.playerName(), "IVAN");          // and the name carries over
+
+    // Written to the new location straight away, so the next launch needs no
+    // migration at all...
+    ScoreStore again;
+    CHECK(again.open(fresh.path, legacy.path));
+    CHECK(!again.migrated());
+    CHECK_EQ(static_cast<int>(again.highScores().size()), 2);
+
+    // ...and the old file is untouched, in case anything went wrong.
+    ScoreStore old;
+    CHECK(old.open(legacy.path));
+    CHECK_EQ(static_cast<int>(old.highScores().size()), 2);
+}
+
+TEST(an_existing_table_is_never_replaced_by_an_older_one) {
+    Scratch legacy("nostomp-src");
+    Scratch fresh("nostomp-dst");
+    {
+        ScoreStore old;
+        CHECK(old.open(legacy.path));
+        old.recordRun(makeRun("OLD", 999999, 40, 100));
+    }
+    {   // The new location already has a table of its own.
+        ScoreStore db;
+        CHECK(db.open(fresh.path));
+        db.recordRun(makeRun("NEW", 500, 2, 200));
+    }
+
+    ScoreStore db;
+    CHECK(db.open(fresh.path, legacy.path));
+    CHECK(!db.migrated());
+    CHECK_EQ(static_cast<int>(db.highScores().size()), 1);
+    CHECK_STR(db.highScores()[0].playerName, "NEW");   // not overwritten
+}
+
+TEST(a_missing_or_empty_old_location_is_simply_a_fresh_start) {
+    Scratch fresh("nolegacy");
+    ScoreStore db;
+    CHECK(db.open(fresh.path, "build/there-is-no-such-file.dat"));
+    CHECK(db.ready());
+    CHECK(!db.migrated());
+    CHECK(db.highScores().empty());
+    CHECK_STR(db.playerName(), ScoreRules::DEFAULT_NAME);
+}

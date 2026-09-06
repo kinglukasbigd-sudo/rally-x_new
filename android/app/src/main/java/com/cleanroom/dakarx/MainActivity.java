@@ -1,9 +1,9 @@
-package com.cleanroom.newrallyx;
+package com.cleanroom.dakarx;
 
 import org.libsdl.app.SDLActivity;
 
 /**
- * New Rally-X on Android.
+ * Dakar X on Android.
  *
  * Everything about the game lives in the shared C++ core; this class exists
  * only to tell SDL which native libraries to load. Input, rendering, audio and

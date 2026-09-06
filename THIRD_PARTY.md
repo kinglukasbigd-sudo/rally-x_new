@@ -43,7 +43,9 @@ source tracks attach to these files.
 
 ## The original game
 
-*New Rally-X* and *Rally-X* are trademarks of their respective owner. This
+*Dakar X* is not affiliated with, endorsed by or derived from any existing game.
+*New Rally-X* and *Rally-X* are trademarks of their respective owner, named here
+only to identify the arcade game whose mechanics this project reconstructs. This
 project is an independent clean-room reconstruction of the 1981 game's
 behaviour; it contains no code, artwork, audio, or data from the original, and
 is not affiliated with or endorsed by the trademark holder. See the README's

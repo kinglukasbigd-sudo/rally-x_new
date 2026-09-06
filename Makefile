@@ -1,6 +1,6 @@
-# New Rally-X -- clean-room reconstruction (Phase 1)
+# Dakar X -- clean-room arcade maze game
 #
-# Build:  make          -> build/newrallyx
+# Build:  make          -> build/dakarx
 # Run:    make run
 # Debug:  make BUILD=debug
 
@@ -33,7 +33,7 @@ LDLIBS   := $(SDL_LIBS) -lm
 
 SRCDIR   := src
 OBJDIR   := build/obj/$(BUILD)
-BIN      := build/newrallyx
+BIN      := build/dakarx
 
 SOURCES  := $(shell find $(SRCDIR) -name '*.cpp')
 OBJECTS  := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SOURCES))
@@ -60,7 +60,7 @@ run: $(BIN)
 levels:
 	python3 tools/genlevel.py levels
 
-TEST_BIN     := build/rallyx_tests
+TEST_BIN     := build/dakarx_tests
 TEST_SOURCES := $(wildcard tests/*.cpp)
 GAME_OBJECTS := $(filter-out $(OBJDIR)/main.o,$(OBJECTS))
 TEST_OBJECTS := $(patsubst tests/%.cpp,build/obj/tests/%.o,$(TEST_SOURCES))

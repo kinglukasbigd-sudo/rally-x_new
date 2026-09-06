@@ -19,6 +19,11 @@ bool exists(const std::string& path);
 // not there.  Returns "./" if even that fails, so a caller always has a path.
 std::string writableDataDir();
 
+// Where this game's data used to live, before the project was renamed.  Empty
+// when there is no such place on this platform.  It exists so a player who had
+// scores under the old name keeps them; nothing else should ever read it.
+std::string legacyDataDir();
+
 // Writes a file so that it either lands complete or does not land at all: the
 // data goes to a neighbouring temporary file, is flushed to the disk, and is
 // then renamed over the target in one step.  A crash or a power cut can lose

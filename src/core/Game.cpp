@@ -51,10 +51,18 @@ std::vector<std::string> userMusicDirs() {
 
 #if defined(__ANDROID__)
     // The app's own external folder, reachable over USB or a file manager at
-    //   Android/data/com.cleanroom.newrallyx/files/music/
+    //   Android/data/com.cleanroom.dakarx/files/music/
     if (const char* ext = SDL_AndroidGetExternalStoragePath())
         dirs.push_back(std::string(ext) + "/music/");
 #else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"))
+        dirs.push_back(std::string(xdg) + "/dakarx/music/");
+    if (const char* home = std::getenv("HOME"))
+        dirs.push_back(std::string(home) + "/.local/share/dakarx/music/");
+
+    // The folders an older build under the project's previous name used.  They
+    // are searched last and only ever read, so a player who already had music
+    // there keeps hearing it without having to move a single file.
     if (const char* xdg = std::getenv("XDG_DATA_HOME"))
         dirs.push_back(std::string(xdg) + "/newrallyx/music/");
     if (const char* home = std::getenv("HOME"))
@@ -107,7 +115,7 @@ std::string levelFileName(const std::string& dir, int index) {
 }
 
 std::string findDataDir(const std::string& preferred) {
-    const char* env = std::getenv("RALLYX_DATA");
+    const char* env = std::getenv("DAKARX_DATA");
     if (env && fileExists(std::string(env) + "/level01.lvl")) return env;
     // "levels" is the one that resolves inside an APK, so it comes first
     // after any explicit override.
@@ -133,7 +141,7 @@ bool Game::init(int scale, const std::string& dataDir, int startRound,
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "no level data under '%s', using fallback maze", dataDir_.c_str());
 
-    if (!renderer_.init("New Rally-X", scale, fullscreen)) return false;
+    if (!renderer_.init("Dakar X", scale, fullscreen)) return false;
 
     // On a touch device there is no keyboard, so the on-screen pad is the only
     // way to drive.  It can also be forced on for testing with --touch.
@@ -153,10 +161,20 @@ bool Game::init(int scale, const std::string& dataDir, int startRound,
     const std::string dbPath = scoreDbPath.empty()
                              ? FileSystem::writableDataDir() + ScoreRules::FILE_NAME
                              : scoreDbPath;
-    if (scoresDb_.open(dbPath))
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "scores: %s (%d saved, %d runs)",
+    // A table written under the project's previous name is adopted if this one
+    // has nothing in it yet, so the rename costs nobody their scores.
+    // Guarded, because an empty legacy directory would otherwise turn into a
+    // bare relative filename and pick up whatever happens to be alongside the
+    // executable.
+    const std::string legacyDir = scoreDbPath.empty() ? FileSystem::legacyDataDir()
+                                                      : std::string();
+    const std::string legacyDb  = legacyDir.empty() ? std::string()
+                                                    : legacyDir + ScoreRules::FILE_NAME;
+    if (scoresDb_.open(dbPath, legacyDb))
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "scores: %s (%d saved, %d runs)%s",
                     dbPath.c_str(), static_cast<int>(scoresDb_.highScores().size()),
-                    static_cast<int>(scoresDb_.runs().size()));
+                    static_cast<int>(scoresDb_.runs().size()),
+                    scoresDb_.migrated() ? "  <= carried over from the old location" : "");
     else
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "scores: cannot use '%s' -- this session's scores will not be kept",
@@ -945,7 +963,7 @@ Rect Game::nameGridRect() const {
 void Game::renderStartScreen() {
     const int cx = SCREEN_W / 2;
 
-    renderer_.textCentered(cx, 44,  "NEW RALLY-X", pal::Accent);
+    renderer_.textCentered(cx, 44,  "DAKAR X", pal::Accent);
     renderer_.fillRect(cx - 46, 56, 92, 1, pal::Accent);
     renderer_.textCentered(cx, 66,  "1981", pal::TextDim);
 

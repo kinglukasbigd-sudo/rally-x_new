@@ -1,6 +1,7 @@
 #include "core/FileSystem.h"
 #include <SDL.h>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -37,12 +38,33 @@ std::string writableDataDir() {
 #endif
     // SDL creates the directory as a side effect, which is exactly what is
     // wanted on a first run.
-    if (char* p = SDL_GetPrefPath("cleanroom", "newrallyx")) {
+    if (char* p = SDL_GetPrefPath("cleanroom", "dakarx")) {
         std::string dir(p);
         SDL_free(p);
         if (!dir.empty()) return dir;
     }
     return "./";
+}
+
+std::string legacyDataDir() {
+#if defined(__ANDROID__)
+    // Nothing to return.  The old build was a different package, and Android
+    // walls one app's private storage off from another's, so the old data is
+    // not reachable from here however much we would like it to be.
+    return "";
+#else
+    // Assembled by hand rather than asked of SDL_GetPrefPath, because that
+    // creates whatever it is asked for and would leave an empty directory
+    // behind for every player who never ran the old build.  The shape has to
+    // match what SDL_GetPrefPath itself produced back then, organisation
+    // segment included -- get that wrong and the migration quietly finds
+    // nothing, which looks exactly like having had nothing to migrate.
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"))
+        return std::string(xdg) + "/cleanroom/newrallyx/";
+    if (const char* home = std::getenv("HOME"))
+        return std::string(home) + "/.local/share/cleanroom/newrallyx/";
+    return "";
+#endif
 }
 
 bool writeFileAtomic(const std::string& path, const std::string& data) {

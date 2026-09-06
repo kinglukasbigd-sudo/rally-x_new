@@ -130,7 +130,7 @@ bool ScoreStore::renameLatest(const std::string& name) {
 
 std::string ScoreStore::serialize() const {
     std::ostringstream out;
-    out << "# New Rally-X scores -- written by the game.  Safe to delete.\n";
+    out << "# Dakar X scores -- written by the game.  Safe to delete.\n";
     out << "version 1\n";
     out << "player " << playerName_ << "\n";
     // The name goes last on every line because it is the only field that could
@@ -186,9 +186,10 @@ void ScoreStore::parse(const std::string& text) {
     sortAndTrim();
 }
 
-bool ScoreStore::open(const std::string& path) {
-    path_  = path;
-    ready_ = false;
+bool ScoreStore::open(const std::string& path, const std::string& legacyPath) {
+    path_     = path;
+    ready_    = false;
+    migrated_ = false;
     clear();
 
     std::string text;
@@ -198,9 +199,20 @@ bool ScoreStore::open(const std::string& path) {
         return true;
     }
 
-    // Not there yet, or unreadable.  Lay down an empty database so the very
-    // first run has somewhere to go, and so a permissions problem shows up now
-    // rather than at the end of somebody's best game.
+    // Nothing here yet.  Before starting empty, look for a table written by a
+    // build from before the project was renamed and adopt it wholesale --
+    // scores, runs, player name and all.  The old file is left exactly where
+    // it is: this copies, it does not move.
+    if (!legacyPath.empty() && legacyPath != path_ &&
+        FileSystem::readTextFile(legacyPath, text)) {
+        parse(text);
+        migrated_ = !scores_.empty() || !runs_.empty() ||
+                    playerName_ != ScoreRules::DEFAULT_NAME;
+    }
+
+    // Lay down the database either way, so the very first run has somewhere to
+    // go and so a permissions problem shows up now rather than at the end of
+    // somebody's best game.
     ready_ = save();
     return ready_;
 }

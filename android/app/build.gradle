@@ -1,13 +1,13 @@
 plugins { id 'com.android.application' }
 
 android {
-    namespace 'com.cleanroom.newrallyx'
+    namespace 'com.cleanroom.dakarx'
     compileSdk 34
     buildToolsVersion '35.0.0'
     ndkVersion '27.2.12479018'
 
     defaultConfig {
-        applicationId 'com.cleanroom.newrallyx'
+        applicationId 'com.cleanroom.dakarx'
         minSdk 21
         targetSdk 34
         versionCode 1

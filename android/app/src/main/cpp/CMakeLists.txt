@@ -1,10 +1,10 @@
-# Android build for New Rally-X.
+# Android build for Dakar X.
 #
 # The entire game core is the same C++ that the desktop build uses -- there is
 # no Android-specific gameplay code.  This file only wires SDL2 and the shared
 # sources together into the libmain.so that SDLActivity loads.
 cmake_minimum_required(VERSION 3.22)
-project(newrallyx CXX C)
+project(dakarx CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

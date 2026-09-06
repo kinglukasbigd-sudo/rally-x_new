@@ -23,7 +23,7 @@ bool canTurn(const TileMap& map, const Vec2& pos, Direction dir, float tolerance
 
 // Advance a grid-aligned car.  `desired` is the direction the controller
 // wants; the car keeps its current heading until a turn becomes legal, which
-// is what gives Rally-X its "commit to the corridor" feel.
+// is what gives the game its "commit to the corridor" feel.
 MoveResult step(const TileMap& map, Vec2& pos, Direction& dir,
                 Direction desired, float speed, float tolerance = 5.0f);
 
