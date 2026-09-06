@@ -10,7 +10,9 @@
 #include "core/TouchControls.h"
 #include <SDL.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
+#include <string>
 
 using namespace rx;
 
@@ -21,13 +23,27 @@ namespace {
 struct HeadlessGame {
     Game g;
     bool ok = false;
+    std::string dbPath;
+    bool keepDb = false;
     explicit HeadlessGame(bool touch = false,
-                          TouchScheme scheme = TouchScheme::Swipe) {
+                          TouchScheme scheme = TouchScheme::Swipe,
+                          const std::string& sharedDb = "") {
         setenv("SDL_VIDEODRIVER", "dummy", 1);
         setenv("SDL_AUDIODRIVER", "dummy", 1);
-        ok = g.init(1, "levels", 1, false, touch, scheme);
+        // Its own scratch database: a test run must never write into the score
+        // table of whoever happens to be running the tests.  A shared path is
+        // how the restart tests hand one database to two game instances.
+        static int counter = 0;
+        keepDb = !sharedDb.empty();
+        dbPath = keepDb ? sharedDb
+                        : "build/test-scores-" + std::to_string(++counter) + ".dat";
+        if (!keepDb) std::remove(dbPath.c_str());
+        ok = g.init(1, "levels", 1, false, touch, scheme, 0, dbPath);
     }
-    ~HeadlessGame() { if (ok) g.shutdown(); }
+    ~HeadlessGame() {
+        if (ok) g.shutdown();
+        if (!keepDb) std::remove(dbPath.c_str());
+    }
 
     void run(int steps) {
         for (int i = 0; i < steps; ++i) {
@@ -98,7 +114,12 @@ TEST(running_out_of_cars_ends_the_game_and_returns_to_the_title) {
     CHECK(h.g.state() == GameState::GameOver);
     CHECK(h.g.lifeSystem().gameOver());
 
-    CHECK(h.waitFor(GameState::StartScreen, 60 * 6));
+    // Game over now runs through the score screens on the way back to the
+    // title: a run that earned a place is named first, and every run is shown
+    // the table.  Both screens time out on their own, so an abandoned cabinet
+    // still finds its way home.
+    CHECK(h.waitFor(GameState::HighScores, 60 * 40));
+    CHECK(h.waitFor(GameState::StartScreen, 60 * 15));
 }
 
 TEST(clearing_a_round_advances_to_the_next_one) {
@@ -829,4 +850,117 @@ TEST(the_pause_button_only_exists_while_a_round_is_running) {
     for (int i = 0; i < 300 && h.g.state() != GameState::Playing; ++i) idle(h, 1);
     h.g.pumpInput();
     CHECK(h.g.pauseButtonRect().w > 0.f);                    // and one during play
+}
+
+// ---------------------------------------------------------------------------
+// Persistent scores, driven through the real game rather than the store alone.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Plays until the cars run out.  Returns false if the game somehow never ends.
+bool playToGameOver(HeadlessGame& h) {
+    h.press(Action::Start);
+    for (int life = 0; life < 8; ++life) {
+        if (h.g.state() == GameState::GameOver) return true;
+        if (!h.waitFor(GameState::Playing, 60 * 12)) break;
+        // Bank the round's flags so the run scores something worth saving,
+        // then let the fuel run out.
+        h.g.debugCollectAllFlags();
+        if (!h.waitFor(GameState::PlayerDeath, 60 * 120)) break;
+        h.run(60 * 3);
+        if (h.g.state() == GameState::GameOver) return true;
+    }
+    return h.g.state() == GameState::GameOver;
+}
+
+} // namespace
+
+TEST(a_finished_game_is_written_to_the_database) {
+    HeadlessGame h; CHECK(h.ok);
+    CHECK(h.g.scoreStore().ready());
+    CHECK(h.g.scoreStore().runs().empty());
+
+    CHECK(playToGameOver(h));
+
+    // Filed on the way into the game-over screen, not at shutdown.
+    const auto& runs = h.g.scoreStore().runs();
+    CHECK_EQ(static_cast<int>(runs.size()), 1);
+    CHECK_EQ(runs[0].finalScore, h.g.score().score());
+    CHECK(runs[0].levelReached >= 1);
+    CHECK(runs[0].endedAt >= runs[0].startedAt);
+    CHECK(runs[0].id > 0);
+
+    if (h.g.score().score() > 0) {
+        CHECK_EQ(static_cast<int>(h.g.scoreStore().highScores().size()), 1);
+        CHECK_EQ(h.g.scoreStore().highScores()[0].score, h.g.score().score());
+    }
+}
+
+TEST(a_high_score_survives_the_application_being_restarted) {
+    const std::string db = "build/test-restart.dat";
+    std::remove(db.c_str());
+
+    int scored = 0;
+    {   // The first session: play a game to the end, then quit properly.
+        HeadlessGame h(false, TouchScheme::Swipe, db); CHECK(h.ok);
+        h.g.scoreStore().setPlayerName("IVAN");
+        CHECK(playToGameOver(h));
+        scored = h.g.score().score();
+        CHECK(scored > 0);
+    }
+    {   // A brand new process, reading the file off the disk.
+        HeadlessGame h(false, TouchScheme::Swipe, db); CHECK(h.ok);
+        const auto& table = h.g.scoreStore().highScores();
+        CHECK_EQ(static_cast<int>(table.size()), 1);
+        CHECK_EQ(table[0].score, scored);
+        CHECK_STR(table[0].playerName, "IVAN");
+        // ...and the title screen shows it, which is the visible half of the
+        // bug this phase set out to fix.
+        CHECK_EQ(h.g.score().highScore(), scored);
+        CHECK(h.g.state() == GameState::StartScreen);
+
+        // Starting another game must not wipe it.
+        h.press(Action::Start);
+        CHECK(h.waitFor(GameState::Playing, 300));
+        CHECK_EQ(h.g.score().score(), 0);
+        CHECK_EQ(h.g.score().highScore(), scored);
+        CHECK_EQ(static_cast<int>(h.g.scoreStore().highScores().size()), 1);
+    }
+    std::remove(db.c_str());
+}
+
+TEST(a_new_run_starts_with_three_cars_and_a_clean_milestone_sheet) {
+    HeadlessGame h; CHECK(h.ok);
+    h.press(Action::Start);
+    CHECK(h.waitFor(GameState::Playing, 300));
+    CHECK_EQ(h.g.lifeSystem().lives(), START_LIVES);
+    CHECK_EQ(h.g.lifeSystem().bonusesAwarded(), 0);
+}
+
+TEST(the_name_screen_is_offered_only_when_a_run_earned_a_place) {
+    HeadlessGame h; CHECK(h.ok);
+    CHECK(playToGameOver(h));
+    CHECK(h.g.score().score() > 0);          // so it does qualify
+
+    // Game over leads to the name screen, and the name screen leads to the
+    // table.  Both find their own way onward if nobody touches anything.
+    CHECK(h.waitFor(GameState::NameEntry, 60 * 8));
+    CHECK(h.waitFor(GameState::HighScores, 60 * 30));
+    CHECK(h.waitFor(GameState::StartScreen, 60 * 15));
+}
+
+TEST(the_high_score_table_is_reachable_from_the_title_screen) {
+    HeadlessGame h; CHECK(h.ok);
+    CHECK(h.g.state() == GameState::StartScreen);
+    // 'H' on the title screen, and it comes back on its own.
+    SDL_Event e{};
+    e.type = SDL_KEYDOWN;
+    e.key.keysym.sym = SDLK_h;
+    e.key.keysym.scancode = SDL_SCANCODE_H;
+    SDL_PushEvent(&e);
+    h.g.pumpInput();
+    h.run(1);
+    CHECK(h.g.state() == GameState::HighScores);
+    CHECK(h.waitFor(GameState::StartScreen, 60 * 15));
 }

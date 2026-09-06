@@ -1,4 +1,5 @@
 #include "TestFramework.h"
+#include "core/NameEntry.h"
 #include "core/Types.h"
 #include "rendering/Font.h"
 #include "rendering/RoundTheme.h"
@@ -735,4 +736,19 @@ TEST(the_smoke_button_can_be_worked_indefinitely) {
         last = r.fuel().fuel();
     }
     CHECK_EQ(bursts, 20);       // every single press produced smoke
+}
+
+TEST(the_font_can_draw_every_character_the_name_grid_offers) {
+    // The grid is the one place the game puts a character on screen that it
+    // did not write itself, so it has to be checked against the font directly
+    // rather than against a list somebody remembered to update.
+    for (int i = 0; i < NameEntry::COLS * NameEntry::ROWS; ++i) {
+        const char c = NameEntry::charset()[i];
+        bool found = false;
+        for (int g = 0; g < FONT_GLYPH_COUNT; ++g)
+            if (FONT_GLYPHS[g].c == c) { found = true; break; }
+        if (!found)
+            ::test::fail(__FILE__, __LINE__,
+                         std::string("name grid offers '") + c + "', the font cannot draw it");
+    }
 }

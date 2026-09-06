@@ -238,14 +238,17 @@ TEST(lives_run_out_and_then_the_game_is_over) {
     CHECK(l.gameOver());
 }
 
-TEST(the_bonus_car_is_awarded_once) {
+TEST(the_first_bonus_car_is_awarded_once) {
     LifeSystem l;
     l.reset(3);
-    CHECK(!l.checkBonusLife(LifeSystem::BONUS_LIFE_SCORE - 1));
+    CHECK_EQ(l.checkBonusLife(LifeSystem::BONUS_LIFE_SCORE - 1), 0);
     CHECK_EQ(l.lives(), 3);
-    CHECK(l.checkBonusLife(LifeSystem::BONUS_LIFE_SCORE));
+    CHECK_EQ(l.checkBonusLife(LifeSystem::BONUS_LIFE_SCORE), 1);
     CHECK_EQ(l.lives(), 4);
-    CHECK(!l.checkBonusLife(999999));
+    // Staying above the milestone pays nothing more.  A score high enough to
+    // clear the later milestones does pay for those, once each -- which is
+    // what test_extralives.cpp goes through in full.
+    CHECK_EQ(l.checkBonusLife(LifeSystem::BONUS_LIFE_SCORE + 5000), 0);
     CHECK_EQ(l.lives(), 4);
 }
 

@@ -35,6 +35,8 @@ int ScoreSystem::awardNormalFlag() {
 
 void ScoreSystem::addBonus(int points) { bump(points); }
 
+void ScoreSystem::setHighScore(int value) { high_ = std::max(high_, value); }
+
 void ScoreSystem::bump(int points) {
     score_ += points;
     high_ = std::max(high_, score_);

@@ -32,12 +32,19 @@ public:
 
     void setFromExternal(Action a, bool state);   // used by headless tests
 
+    // While the player is typing a name, the letter keys have to be letters.
+    // In text mode only the arrows steer and only the dedicated keys act, so
+    // an 'A' in a name does not also nudge the cursor left.
+    void setTextMode(bool on) { textMode_ = on; }
+    bool textMode() const { return textMode_; }
+
 private:
     static constexpr int idx(Action a) { return static_cast<int>(a); }
     static constexpr int N = static_cast<int>(Action::Count);
 
     std::array<bool, N> cur_{}, prev_{};
     std::array<bool, 10> fnCur_{}, fnPrev_{};
+    bool textMode_ = false;
     Direction lastDir_ = Direction::None;
 };
 

@@ -22,3 +22,8 @@ __pycache__/
 # Player-supplied music. Whatever anyone drops in here is theirs, and must
 # never be committed or shipped in the APK.
 music/
+
+# The local score database, written at runtime. It belongs to whoever played,
+# and lives outside the project anyway -- this only catches a stray copy.
+scores.dat
+scores.dat.tmp

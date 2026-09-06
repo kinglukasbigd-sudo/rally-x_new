@@ -11,7 +11,9 @@ enum class GameState {
     ChallengingStage, // structurally a Playing variant, driven by ChallengeStage
     PlayerDeath,
     RoundComplete,
-    GameOver
+    GameOver,
+    NameEntry,        // typing the name a run is filed under
+    HighScores        // the persistent table
 };
 
 inline const char* stateName(GameState s) {
@@ -23,6 +25,8 @@ inline const char* stateName(GameState s) {
         case GameState::PlayerDeath:      return "PLAYER_DEATH";
         case GameState::RoundComplete:    return "ROUND_COMPLETE";
         case GameState::GameOver:         return "GAME_OVER";
+        case GameState::NameEntry:        return "NAME_ENTRY";
+        case GameState::HighScores:       return "HIGH_SCORES";
     }
     return "?";
 }

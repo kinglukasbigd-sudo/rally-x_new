@@ -22,6 +22,11 @@ public:
 
     int  score()      const { return score_; }
     int  highScore()  const { return high_; }
+
+    // Seeds the high score from the saved table at start-up, so the number on
+    // the title screen is the best score ever recorded rather than the best of
+    // this sitting.  Never lowers what the current session has already beaten.
+    void setHighScore(int value);
     int  multiplier() const { return multiplier_; }
     int  flagsScored()const { return sequence_; }
 

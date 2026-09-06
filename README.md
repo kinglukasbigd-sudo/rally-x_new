@@ -197,8 +197,9 @@ and no car lost if the run ends early.
 ```
 src/
   core/        Game (state machine + fixed-step loop), InputManager, TouchControls,
-               FileSystem, Types, Debug
+               NameEntry, FileSystem, Types, Debug
   world/       TileMap, Maze, LevelLoader, Camera, CollisionSystem
+  data/        ScoreStore (the local score database)
   entities/    Player, Enemy, Flag, Rock, Turbo, SmokeCloud
   ai/          NavigationGraph, Pathfinding, EnemyAI, EscapeAnalyzer
   gameplay/    Round, ScoreSystem, FuelSystem, LifeSystem, SmokeSystem,
@@ -210,7 +211,7 @@ assets/audio/  music_normal.wav, music_challenge.wav -- the looping background t
 android/       Gradle + NDK project wrapping the same core (see Android, above)
 tools/         genlevel.py, find_loop.py, make_music.py, fetch_sdl2.sh,
                fetch_sdl2_android.sh
-tests/         215 gameplay tests, run with `make test`
+tests/         259 gameplay tests, run with `make test`
 ```
 
 Presentation runs at a fixed internal resolution of 288×224, drawn into an offscreen
@@ -389,7 +390,20 @@ gameplay code. The judgement calls made for this phase:
   releases the penned cars at `Round::CHASE_SPEED_MULTIPLE` (2x the player) after a half
   second, a perfect clear pays 5000, and ending early never costs a life. Isolated in
   `ChallengeStage` and `Round::startChallengeChase`.
-- **Bonus car** — one extra car at 20,000 points.
+- **Bonus cars** — one extra car at 20,000, 60,000 and 110,000 points. Each milestone pays
+  once per run: the test is "the score has reached it", so a jump from 19,950 to 20,150
+  still pays, and staying above it afterwards never pays again. Crashing does not put a
+  claimed milestone back. `LifeSystem::BONUS_LIFE_SCORES` is the only place the numbers
+  appear.
+- **Persistent scores** — requested house rule, not original: the top ten runs and the last
+  fifty played survive closing the game. They live in a plain-text database
+  (`ScoreStore`) under the platform's own writable directory — `SDL_GetPrefPath` on
+  desktop, the app's private storage on Android — written the moment a run ends rather
+  than at shutdown, and written atomically so an interrupted save cannot corrupt the
+  table. A run is filed under a player name entered on an arcade letter grid
+  (`NameEntry`), reachable from the title screen and offered automatically after a run
+  that earns a place. A database that cannot be read or written costs the scores and
+  nothing else: the game still starts and still plays.
 - **Losing a life** — requested house rule, not original: the flags already collected stay
   collected, and the scoring ladder carries on where it left off. Only the car, the pursuit
   and the tank are reset (`Round::restartAfterDeath`). A new round resets everything.

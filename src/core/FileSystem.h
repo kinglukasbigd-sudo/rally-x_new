@@ -12,5 +12,18 @@ namespace FileSystem {
 bool readTextFile(const std::string& path, std::string& out);
 bool exists(const std::string& path);
 
+// The one directory the game may write to, with a trailing separator.  On
+// desktop that is the platform's per-user preferences path; on Android it is
+// the app's private internal storage, which is writable without asking for a
+// permission and is cleaned up when the app is uninstalled.  Created if it is
+// not there.  Returns "./" if even that fails, so a caller always has a path.
+std::string writableDataDir();
+
+// Writes a file so that it either lands complete or does not land at all: the
+// data goes to a neighbouring temporary file, is flushed to the disk, and is
+// then renamed over the target in one step.  A crash or a power cut can lose
+// the write but can never leave a half-written file behind.
+bool writeFileAtomic(const std::string& path, const std::string& data);
+
 } // namespace FileSystem
 } // namespace rx

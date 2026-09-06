@@ -4,6 +4,8 @@
 #include "core/InputManager.h"
 #include "core/Debug.h"
 #include "core/TouchControls.h"
+#include "core/NameEntry.h"
+#include "data/ScoreStore.h"
 #include "gameplay/Round.h"
 #include "gameplay/ScoreSystem.h"
 #include "gameplay/LifeSystem.h"
@@ -23,9 +25,14 @@ namespace rx {
 // Every state transition goes through setState so the flow stays in one place.
 class Game {
 public:
+    // `scoreDbPath` overrides where the score database lives.  Empty means the
+    // platform's own writable location, which is what the shipped game uses;
+    // the tests point it at a scratch file so a test run can never touch a
+    // real player's table.
     bool init(int scale, const std::string& dataDir, int startRound = 1,
               bool fullscreen = false, bool touchUi = false,
-              TouchScheme scheme = TouchScheme::Swipe, uint32_t seed = 0);
+              TouchScheme scheme = TouchScheme::Swipe, uint32_t seed = 0,
+              const std::string& scoreDbPath = "");
     void run();
     // Dev tool: runs a scripted demo with no player at the keyboard and dumps
     // BMP frames, so rendering and gameplay can be checked without a display.
@@ -45,6 +52,11 @@ public:
     const ScoreSystem& score() const { return score_; }
     const LifeSystem&  lifeSystem() const { return lives_; }
     const AudioManager& audio() const { return audio_; }
+    // The persistent table.  Exposed so the headless tests can drive a real
+    // game to its end and then read back what was written.
+    const ScoreStore&  scoreStore() const { return scoresDb_; }
+    ScoreStore&        scoreStore()       { return scoresDb_; }
+    const NameEntry&   nameEntry()  const { return nameEntry_; }
     int  roundNumber() const { return roundNumber_; }
     InputManager& input() { return input_; }
     // Development shortcut (F8): banks every remaining flag in the round.
@@ -64,6 +76,14 @@ private:
     std::string levelPath(int roundNumber) const;
 
     void renderStartScreen();
+    void renderNameEntry();
+    void renderHighScores();
+    // Files the run that has just ended.  Called once, on the way into the
+    // game-over screen.
+    void recordFinishedRun();
+    void beginNameEntry(bool afterRun);
+    void finishNameEntry();
+    Rect nameGridRect() const;
     void renderWorld();
     void renderOverlayText();
     void renderDebug();
@@ -71,6 +91,9 @@ private:
     void drawSwipeFeedback();
     void drawPauseButton();
     void updatePauseButtonRect();
+    // Routes a tap to whatever menu control is under it; true when one
+    // took it, so the caller knows not to treat it as gameplay.
+    bool handleMenuTap(float x, float y);
     void setPaused(bool on);
     bool canPause() const;
 
@@ -81,6 +104,8 @@ private:
     Radar          radar_;
     InputManager   input_;
     ScoreSystem    score_;
+    ScoreStore     scoresDb_;
+    NameEntry      nameEntry_;
     LifeSystem     lives_;
     Round          round_;
     ChallengeStage challenge_;
@@ -100,10 +125,17 @@ private:
     float     fps_        = 0.f;
     float     lowFuelTimer_ = 0.f;
     int       lastLives_  = START_LIVES;
+    // The run in progress: when it started, and where the one that just ended
+    // landed in the table (0 = nowhere).
+    int64_t   runStartedAt_ = 0;
+    int       lastRank_     = 0;
+    bool      nameEntryAfterRun_ = false;
     Rect      schemeToggleRect_{};
     Rect      musicToggleRect_{};
     Rect      soundToggleRect_{};
     Rect      pauseButtonRect_{};
+    Rect      playerNameRect_{};
+    Rect      highScoreRect_{};
     bool      paused_ = false;
     float     muteNoticeTimer_ = 0.f;
     bool      hasTouchDevice_ = false;

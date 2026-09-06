@@ -1,6 +1,10 @@
 #include "core/FileSystem.h"
 #include <SDL.h>
+#include <cstdio>
 #include <vector>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace rx {
 namespace FileSystem {
@@ -22,6 +26,51 @@ bool readTextFile(const std::string& path, std::string& out) {
     SDL_RWclose(rw);
     out.resize(read);
     return read > 0;
+}
+
+std::string writableDataDir() {
+#if defined(__ANDROID__)
+    // Private to the app: no storage permission needed, and it survives every
+    // update.  This is where the score database lives on a phone.
+    if (const char* p = SDL_AndroidGetInternalStoragePath())
+        return std::string(p) + "/";
+#endif
+    // SDL creates the directory as a side effect, which is exactly what is
+    // wanted on a first run.
+    if (char* p = SDL_GetPrefPath("cleanroom", "newrallyx")) {
+        std::string dir(p);
+        SDL_free(p);
+        if (!dir.empty()) return dir;
+    }
+    return "./";
+}
+
+bool writeFileAtomic(const std::string& path, const std::string& data) {
+    const std::string tmp = path + ".tmp";
+
+    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+
+    bool ok = data.empty() ||
+              std::fwrite(data.data(), 1, data.size(), f) == data.size();
+    if (ok) ok = (std::fflush(f) == 0);
+#if !defined(_WIN32)
+    // Without this the rename can reach the disk before the contents do, and a
+    // power cut leaves an empty file where the scores used to be.
+    if (ok) ok = (::fsync(fileno(f)) == 0);
+#endif
+    if (std::fclose(f) != 0) ok = false;
+
+    if (!ok) { std::remove(tmp.c_str()); return false; }
+
+#if defined(_WIN32)
+    std::remove(path.c_str());        // rename will not overwrite on Windows
+#endif
+    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+        std::remove(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool exists(const std::string& path) {

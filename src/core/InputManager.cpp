@@ -33,6 +33,23 @@ void InputManager::handleEvent(const SDL_Event& e) {
         return;
     }
 
+    // Every key that doubles as a letter is off limits while a name is being
+    // typed; the arrows and the dedicated keys below still work.
+    if (textMode_) {
+        switch (sc) {
+            case SDL_SCANCODE_UP:    setFromExternal(Action::Up,    state); break;
+            case SDL_SCANCODE_DOWN:  setFromExternal(Action::Down,  state); break;
+            case SDL_SCANCODE_LEFT:  setFromExternal(Action::Left,  state); break;
+            case SDL_SCANCODE_RIGHT: setFromExternal(Action::Right, state); break;
+            case SDL_SCANCODE_SPACE: setFromExternal(Action::Smoke, state); break;
+            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER:
+                                     setFromExternal(Action::Start, state); break;
+            case SDL_SCANCODE_ESCAPE:setFromExternal(Action::Quit,  state); break;
+            default: break;
+        }
+        return;
+    }
+
     switch (sc) {
         case SDL_SCANCODE_UP:    case SDL_SCANCODE_W: setFromExternal(Action::Up,    state); break;
         case SDL_SCANCODE_DOWN:  case SDL_SCANCODE_S: setFromExternal(Action::Down,  state); break;

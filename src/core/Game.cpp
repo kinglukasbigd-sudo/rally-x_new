@@ -1,5 +1,7 @@
 #include "core/Game.h"
+#include <ctime>
 #include "rendering/Palette.h"
+#include "rendering/Font.h"
 #include "world/LevelLoader.h"
 #include "core/FileSystem.h"
 #include <SDL.h>
@@ -15,6 +17,8 @@ constexpr float READY_SECONDS          = 2.0f;
 constexpr float ROUND_COMPLETE_SECONDS = 2.5f;
 constexpr float DEATH_SECONDS          = 2.0f;
 // Title-screen control-scheme toggle, in framebuffer pixels.
+constexpr int   PLAYER_TEXT_Y          = 80;    // title-screen menu rows
+constexpr int   SCORES_TEXT_Y          = 92;
 constexpr int   TOGGLE_TEXT_Y          = 166;
 constexpr int   MUSIC_TEXT_Y           = 182;
 constexpr int   SOUND_TEXT_Y           = 196;
@@ -22,6 +26,9 @@ constexpr int   TOGGLE_BOX_X           = 82;
 constexpr int   TOGGLE_BOX_W           = 124;
 constexpr int   TOGGLE_BOX_H           = 18;
 constexpr float GAME_OVER_SECONDS      = 3.0f;
+// A cabinet nobody is standing at has to find its own way back to the title.
+constexpr float NAME_ENTRY_SECONDS     = 25.0f;
+constexpr float HIGH_SCORE_SECONDS     = 10.0f;
 
 bool fileExists(const std::string& p) { return FileSystem::exists(p); }
 
@@ -90,6 +97,15 @@ std::string findAudio(const std::string& name) {
 
 // The game is normally launched from the project root, but tolerate being run
 // from build/ or an installed location.
+// Built with std::string rather than a stack buffer: a data directory passed
+// on the command line can easily be longer than any fixed size worth picking,
+// and a silently truncated path looks exactly like missing level data.
+std::string levelFileName(const std::string& dir, int index) {
+    char num[16];
+    std::snprintf(num, sizeof num, "%02d", index);
+    return dir + "/level" + num + ".lvl";
+}
+
 std::string findDataDir(const std::string& preferred) {
     const char* env = std::getenv("RALLYX_DATA");
     if (env && fileExists(std::string(env) + "/level01.lvl")) return env;
@@ -103,15 +119,14 @@ std::string findDataDir(const std::string& preferred) {
 } // namespace
 
 bool Game::init(int scale, const std::string& dataDir, int startRound,
-                bool fullscreen, bool touchUi, TouchScheme scheme, uint32_t seed) {
+                bool fullscreen, bool touchUi, TouchScheme scheme, uint32_t seed,
+                const std::string& scoreDbPath) {
     dataDir_ = findDataDir(dataDir);
     startRound_ = std::max(1, startRound);
     gameSeed_ = seed ? seed : static_cast<uint32_t>(SDL_GetPerformanceCounter());
     levelCount_ = 0;
     for (int i = 1; i <= 99; ++i) {
-        char buf[64];
-        std::snprintf(buf, sizeof buf, "%s/level%02d.lvl", dataDir_.c_str(), i);
-        if (!fileExists(buf)) break;
+        if (!fileExists(levelFileName(dataDir_, i))) break;
         ++levelCount_;
     }
     if (levelCount_ == 0)
@@ -132,6 +147,22 @@ bool Game::init(int scale, const std::string& dataDir, int startRound,
     audio_.init();          // silence is an acceptable outcome, not an error
     // Make the folder before looking in it, and say where it is: "drop a wav
     // here" is useless advice without the path.
+    // The score database.  Opened before anything can score a point, and a
+    // failure here is logged and shrugged off -- the game is perfectly
+    // playable without a place to keep the table.
+    const std::string dbPath = scoreDbPath.empty()
+                             ? FileSystem::writableDataDir() + ScoreRules::FILE_NAME
+                             : scoreDbPath;
+    if (scoresDb_.open(dbPath))
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "scores: %s (%d saved, %d runs)",
+                    dbPath.c_str(), static_cast<int>(scoresDb_.highScores().size()),
+                    static_cast<int>(scoresDb_.runs().size()));
+    else
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "scores: cannot use '%s' -- this session's scores will not be kept",
+                    dbPath.c_str());
+    score_.setHighScore(scoresDb_.bestScore());
+
     ensureDir(primaryMusicDir());
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "your own music goes in: %s  (music_normal.wav, music_challenge.wav)",
@@ -163,10 +194,7 @@ void Game::shutdown() {
 std::string Game::levelPath(int roundNumber) const {
     if (levelCount_ <= 0) return "";
     // Rounds beyond the authored set cycle back round, as arcade games do.
-    const int idx = ((roundNumber - 1) % levelCount_) + 1;
-    char buf[64];
-    std::snprintf(buf, sizeof buf, "%s/level%02d.lvl", dataDir_.c_str(), idx);
-    return buf;
+    return levelFileName(dataDir_, ((roundNumber - 1) % levelCount_) + 1);
 }
 
 uint32_t Game::flagSeedFor(int roundNumber) const {
@@ -179,7 +207,10 @@ uint32_t Game::flagSeedFor(int roundNumber) const {
 
 void Game::startNewGame() {
     score_.newGame();
-    lives_.reset(START_LIVES);
+    score_.setHighScore(scoresDb_.bestScore());
+    lives_.reset(START_LIVES);          // 3 cars, every milestone unclaimed
+    runStartedAt_ = static_cast<int64_t>(std::time(nullptr));
+    lastRank_ = 0;
     roundNumber_ = startRound_;
     deathCause_ = DeathCause::None;
     challengeBonusShown_ = 0;
@@ -264,6 +295,12 @@ void Game::setPaused(bool on) {
 }
 
 void Game::setState(GameState s) {
+    // The keyboard behaves differently while a name is being typed, and SDL
+    // only delivers text events when it has been asked to.
+    const bool typing = (s == GameState::NameEntry);
+    input_.setTextMode(typing);
+    if (typing) SDL_StartTextInput(); else SDL_StopTextInput();
+
     state_ = s;
     stateTimer_ = 0.f;
     setPaused(false);          // never arrive in a new state still paused
@@ -341,6 +378,48 @@ bool hitToggle(const rx::Rect& r, float x, float y) {
 }
 } // namespace
 
+// Everything a tap can hit that is not the playfield.  A finger and a stand-in
+// mouse click both come through here, so the two can never drift apart -- and
+// a screen's buttons are listed once instead of twice.
+bool Game::handleMenuTap(float x, float y) {
+    if (state_ == GameState::StartScreen) {
+        if (hitToggle(schemeToggleRect_, x, y)) {
+            touch_.setScheme(touch_.scheme() == TouchScheme::Swipe ? TouchScheme::Pad
+                                                                   : TouchScheme::Swipe);
+            audio_.play(Sfx::Flag);
+            return true;
+        }
+        if (hitToggle(musicToggleRect_, x, y)) { audio_.toggleMusicMute(); audio_.play(Sfx::Flag); return true; }
+        if (hitToggle(soundToggleRect_, x, y)) { audio_.toggleSfxMute();   audio_.play(Sfx::Flag); return true; }
+        if (hitToggle(playerNameRect_, x, y))  { beginNameEntry(false);    audio_.play(Sfx::Flag); return true; }
+        if (hitToggle(highScoreRect_, x, y))   { setState(GameState::HighScores); audio_.play(Sfx::Flag); return true; }
+    }
+
+    if (state_ == GameState::NameEntry) {
+        // Tapping a letter picks it.  The grid is in framebuffer pixels, so it
+        // has to be mapped into the window the same way it was drawn.
+        const Rect g = renderer_.gameRect();
+        const float sx = g.w / SCREEN_W, sy = g.h / SCREEN_H;
+        const Rect grid = nameGridRect();
+        const float gx = g.x + grid.x * sx, gy = g.y + grid.y * sy;
+        const float gw = grid.w * sx,       gh = grid.h * sy;
+
+        if (x >= gx && x < gx + gw && y >= gy && y < gy + gh) {
+            const int col = static_cast<int>((x - gx) / (gw / NameEntry::COLS));
+            const int row = static_cast<int>((y - gy) / (gh / NameEntry::ROWS));
+            nameEntry_.setCursor(row * NameEntry::COLS + col);
+            nameEntry_.commit();
+            audio_.play(Sfx::Flag);
+            if (nameEntry_.done()) { audio_.play(Sfx::Start); finishNameEntry(); }
+            return true;
+        }
+        // A tap anywhere else takes the letter under the cursor, so the screen
+        // still works if the grid is awkward to hit.
+        return false;
+    }
+    return false;
+}
+
 void Game::handleEvents() {
     input_.beginFrame();
     // Kept current here rather than only when drawing, so a tap is tested
@@ -357,6 +436,19 @@ void Game::handleEvents() {
         // Android's back button arrives as a key, and it means "leave".
         if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_AC_BACK) running_ = false;
 
+        // Typing a name straight in, for anyone with a keyboard in front of
+        // them.  The grid still works; this just saves using it.
+        if (state_ == GameState::NameEntry) {
+            if (e.type == SDL_TEXTINPUT) {
+                for (const char* c = e.text.text; *c; ++c) nameEntry_.typeChar(*c);
+            } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_BACKSPACE) {
+                nameEntry_.backspace();
+            }
+        } else if (e.type == SDL_KEYDOWN && state_ == GameState::StartScreen) {
+            if (e.key.keysym.sym == SDLK_h)   { setState(GameState::HighScores); audio_.play(Sfx::Flag); }
+            if (e.key.keysym.sym == SDLK_TAB) { beginNameEntry(false);           audio_.play(Sfx::Flag); }
+        }
+
         if (touch_.enabled()) {
             // Finger coordinates are normalised to the window; the pad works
             // in window pixels so it can sit beside the playfield.
@@ -365,22 +457,7 @@ void Game::handleEvents() {
                 case SDL_FINGERMOTION: {
                     const float x = e.tfinger.x * winW, y = e.tfinger.y * winH;
                     if (e.type == SDL_FINGERDOWN) {
-                        if (state_ == GameState::StartScreen && hitToggle(schemeToggleRect_, x, y)) {
-                            touch_.setScheme(touch_.scheme() == TouchScheme::Swipe
-                                             ? TouchScheme::Pad : TouchScheme::Swipe);
-                            audio_.play(Sfx::Flag);
-                            break;                       // not a start tap
-                        }
-                        if (state_ == GameState::StartScreen && hitToggle(musicToggleRect_, x, y)) {
-                            audio_.toggleMusicMute();
-                            audio_.play(Sfx::Flag);
-                            break;
-                        }
-                        if (state_ == GameState::StartScreen && hitToggle(soundToggleRect_, x, y)) {
-                            audio_.toggleSfxMute();
-                            audio_.play(Sfx::Flag);   // heard only if it just came back on
-                            break;
-                        }
+                        if (handleMenuTap(x, y)) break;  // not a start tap
                         if (hitToggle(pauseButtonRect_, x, y) && (canPause() || paused_)) {
                             setPaused(!paused_);
                             break;
@@ -404,22 +481,7 @@ void Game::handleEvents() {
                 case SDL_MOUSEBUTTONDOWN: {
                     if (hasTouchDevice_) break;
                     const float x = static_cast<float>(e.button.x), y = static_cast<float>(e.button.y);
-                    if (state_ == GameState::StartScreen && hitToggle(schemeToggleRect_, x, y)) {
-                        touch_.setScheme(touch_.scheme() == TouchScheme::Swipe
-                                         ? TouchScheme::Pad : TouchScheme::Swipe);
-                        audio_.play(Sfx::Flag);
-                        break;
-                    }
-                    if (state_ == GameState::StartScreen && hitToggle(musicToggleRect_, x, y)) {
-                        audio_.toggleMusicMute();
-                        audio_.play(Sfx::Flag);
-                        break;
-                    }
-                    if (state_ == GameState::StartScreen && hitToggle(soundToggleRect_, x, y)) {
-                        audio_.toggleSfxMute();
-                        audio_.play(Sfx::Flag);
-                        break;
-                    }
+                    if (handleMenuTap(x, y)) break;
                     if (hitToggle(pauseButtonRect_, x, y) && (canPause() || paused_)) {
                         setPaused(!paused_);
                         break;
@@ -512,6 +574,31 @@ void Game::fixedUpdate(float dt) {
             }
             break;
 
+        case GameState::NameEntry: {
+            // The same five inputs every control scheme already speaks.
+            for (Direction d : { Direction::Up, Direction::Down,
+                                 Direction::Left, Direction::Right }) {
+                const Action a = (d == Direction::Up)   ? Action::Up
+                               : (d == Direction::Down) ? Action::Down
+                               : (d == Direction::Left) ? Action::Left : Action::Right;
+                if (input_.pressed(a)) { nameEntry_.move(d); audio_.play(Sfx::Flag); }
+            }
+            if (input_.pressed(Action::Smoke)) { nameEntry_.commit(); audio_.play(Sfx::Flag); }
+            if (input_.pressed(Action::Start))  nameEntry_.finish();
+            // Walked away mid-name: the run keeps the name it was filed under,
+            // which is already on disk.
+            if (stateTimer_ >= NAME_ENTRY_SECONDS) nameEntry_.finish();
+            if (nameEntry_.done()) { audio_.play(Sfx::Start); finishNameEntry(); }
+            break;
+        }
+
+        case GameState::HighScores:
+            if (stateTimer_ >= HIGH_SCORE_SECONDS ||
+                (stateTimer_ > 0.4f &&
+                 (input_.pressed(Action::Start) || input_.pressed(Action::Smoke))))
+                setState(GameState::StartScreen);
+            break;
+
         case GameState::Ready:
             luckyBonusShown_ = 0;
             if (stateTimer_ >= READY_SECONDS) {
@@ -568,6 +655,7 @@ void Game::fixedUpdate(float dt) {
                     setState(GameState::Ready);
                 } else {
                     audio_.play(Sfx::GameOver);
+                    recordFinishedRun();
                     setState(GameState::GameOver);
                 }
             }
@@ -585,8 +673,12 @@ void Game::fixedUpdate(float dt) {
 
         case GameState::GameOver:
             if (stateTimer_ >= GAME_OVER_SECONDS ||
-                (stateTimer_ > 1.f && input_.pressed(Action::Start)))
-                setState(GameState::StartScreen);
+                (stateTimer_ > 1.f && input_.pressed(Action::Start))) {
+                // A run that earned a place gets its name; every other run
+                // goes straight to the table so the player sees where it fell.
+                if (lastRank_ > 0) beginNameEntry(true);
+                else               setState(GameState::HighScores);
+            }
             break;
 
         default:
@@ -604,6 +696,10 @@ void Game::render() {
 
     if (state_ == GameState::StartScreen) {
         renderStartScreen();
+    } else if (state_ == GameState::NameEntry) {
+        renderNameEntry();
+    } else if (state_ == GameState::HighScores) {
+        renderHighScores();
     } else {
         renderWorld();
 
@@ -659,10 +755,16 @@ void Game::render() {
                                       TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
             soundToggleRect_  = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (SOUND_TEXT_Y - 5) * sy,
                                       TOGGLE_BOX_W * sx, TOGGLE_BOX_H * sy };
+            playerNameRect_   = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (PLAYER_TEXT_Y - 3) * sy,
+                                      TOGGLE_BOX_W * sx, 13 * sy };
+            highScoreRect_    = Rect{ g.x + TOGGLE_BOX_X * sx, g.y + (SCORES_TEXT_Y - 3) * sy,
+                                      TOGGLE_BOX_W * sx, 13 * sy };
         } else {
             schemeToggleRect_ = Rect{};
             musicToggleRect_  = Rect{};
             soundToggleRect_  = Rect{};
+            playerNameRect_   = Rect{};
+            highScoreRect_    = Rect{};
         }
     }
     renderer_.endPresent();
@@ -800,12 +902,58 @@ void Game::drawSwipeFeedback() {
         renderer_.fillRect(x, y + (w - filled), w, filled, Color{ 224, 224, 224, 90 });
 }
 
+void Game::recordFinishedRun() {
+    RunRecord run;
+    run.playerName     = scoresDb_.playerName();
+    run.finalScore     = score_.score();
+    run.levelReached   = roundNumber_;
+    run.livesRemaining = lives_.lives();
+    run.startedAt      = runStartedAt_;
+    run.endedAt        = static_cast<int64_t>(std::time(nullptr));
+
+    // Filed the moment the run ends, under whatever name is current.  If the
+    // player then types a new one it is renamed; if they walk away, the score
+    // is already on disk.
+    lastRank_ = scoresDb_.recordRun(run);
+    score_.setHighScore(scoresDb_.bestScore());
+}
+
+void Game::beginNameEntry(bool afterRun) {
+    nameEntryAfterRun_ = afterRun;
+    nameEntry_.begin(scoresDb_.playerName());
+    setState(GameState::NameEntry);
+}
+
+void Game::finishNameEntry() {
+    const std::string name = nameEntry_.result();
+    if (nameEntryAfterRun_ && lastRank_ > 0) scoresDb_.renameLatest(name);
+    else                                     { scoresDb_.setPlayerName(name); scoresDb_.save(); }
+
+    setState(nameEntryAfterRun_ ? GameState::HighScores : GameState::StartScreen);
+}
+
+Rect Game::nameGridRect() const {
+    // Kept in one place because the renderer draws it and the touch handler
+    // hit-tests it, and the two drifting apart is exactly the bug that makes a
+    // button look present and do nothing.
+    constexpr float CELL_W = 20.f, CELL_H = 14.f;
+    const float w = CELL_W * NameEntry::COLS;
+    const float h = CELL_H * NameEntry::ROWS;
+    return Rect{ (SCREEN_W - w) * 0.5f, 96.f, w, h };
+}
+
 void Game::renderStartScreen() {
     const int cx = SCREEN_W / 2;
 
     renderer_.textCentered(cx, 44,  "NEW RALLY-X", pal::Accent);
     renderer_.fillRect(cx - 46, 56, 92, 1, pal::Accent);
     renderer_.textCentered(cx, 66,  "1981", pal::TextDim);
+
+    // The two persistent-score entries.  Both are tappable on a phone and both
+    // work from the keyboard, so neither is a touch-only feature.
+    renderer_.textCentered(cx, PLAYER_TEXT_Y,
+                           "[ PLAYER: " + scoresDb_.playerName() + " ]", pal::Accent);
+    renderer_.textCentered(cx, SCORES_TEXT_Y, "[ HIGH SCORES ]", pal::Accent);
 
     // A blue car being chased across the screen, the way an attract mode
     // would show it.  Pure decoration: it drives on a straight line.
@@ -848,13 +996,112 @@ void Game::renderStartScreen() {
         renderer_.textCentered(cx, SOUND_TEXT_Y, soundOff ? "[ SOUND: OFF ]" : "[ SOUND: ON ]",
                                toggleColour(soundOff));
         renderer_.textCentered(cx, 204, "ARROWS DRIVE   SPACE SMOKE", pal::TextDim);
-        renderer_.textCentered(cx, 213, "M MUSIC   N SOUND   P PAUSE", pal::TextDim);
+        // One line, and it has to end above 224 or the last row is simply not
+        // on the screen.
+        renderer_.textCentered(cx, 213, "M MUSIC N SOUND P PAUSE H SCORES TAB NAME",
+                               pal::TextDim);
     }
 
     if (score_.highScore() > 0) {
         renderer_.textCentered(cx, 4, "HIGH SCORE", pal::Accent);
         renderer_.textCentered(cx, 14, padNumber(score_.highScore(), 6), pal::Text);
     }
+}
+
+void Game::renderNameEntry() {
+    const int cx = SCREEN_W / 2;
+
+    renderer_.textCentered(cx, 24, nameEntryAfterRun_ ? "NEW HIGH SCORE" : "PLAYER NAME",
+                           pal::Accent);
+    if (nameEntryAfterRun_ && lastRank_ > 0) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "RANK %d   %s", lastRank_,
+                      padNumber(score_.score(), 6).c_str());
+        renderer_.textCentered(cx, 38, buf, pal::Text);
+    }
+
+    // What has been typed, with a blinking caret in the next slot so it is
+    // obvious the field is live and how much room is left.
+    const std::string typed = nameEntry_.text();
+    const int nameW = static_cast<int>(ScoreRules::MAX_NAME_LENGTH) * FONT_ADVANCE;
+    const int nameX = cx - nameW / 2;
+    renderer_.fillRect(nameX - 4, 56, nameW + 8, 13, pal::RadarBack);
+    renderer_.drawRect(nameX - 4, 56, nameW + 8, 13, pal::PanelLine);
+    renderer_.text(nameX, 59, typed, pal::Text);
+    if ((tick_ / 20) % 2 == 0 && typed.size() < ScoreRules::MAX_NAME_LENGTH)
+        renderer_.fillRect(nameX + static_cast<int>(typed.size()) * FONT_ADVANCE, 66,
+                           FONT_W, 1, pal::Accent);
+
+    const Rect g = nameGridRect();
+    const int cellW = static_cast<int>(g.w) / NameEntry::COLS;
+    const int cellH = static_cast<int>(g.h) / NameEntry::ROWS;
+
+    for (int i = 0; i < NameEntry::COLS * NameEntry::ROWS; ++i) {
+        const int col = i % NameEntry::COLS, row = i / NameEntry::COLS;
+        const int x = static_cast<int>(g.x) + col * cellW;
+        const int y = static_cast<int>(g.y) + row * cellH;
+        const bool here = (i == nameEntry_.cursor());
+        if (here) renderer_.fillRect(x, y, cellW - 1, cellH - 1, pal::Accent);
+
+        const char c = nameEntry_.charAt(i);
+        const Color ink = here ? pal::Black
+                        : (c == '<' || c == '>') ? pal::FlagSpecial : pal::Text;
+        renderer_.text(x + (cellW - FONT_W) / 2, y + (cellH - FONT_H) / 2,
+                       std::string(1, c), ink);
+    }
+
+    renderer_.textCentered(cx, 160, "- RUBS OUT     - ENDS", pal::TextDim);
+    // The two control glyphs drawn in their own colour, over the gaps left for
+    // them above, so the legend reads as the keys it names.
+    renderer_.text(cx - 78, 160, "<", pal::FlagSpecial);
+    renderer_.text(cx + 6,  160, ">", pal::FlagSpecial);
+
+    if (touch_.enabled())
+        renderer_.textCentered(cx, 176, "TAP A LETTER   SWIPE TO MOVE", pal::TextDim);
+    else
+        renderer_.textCentered(cx, 176, "ARROWS MOVE  SPACE PICKS  ENTER ENDS", pal::TextDim);
+}
+
+void Game::renderHighScores() {
+    const int cx = SCREEN_W / 2;
+    renderer_.textCentered(cx, 14, "HIGH SCORES", pal::Accent);
+    renderer_.fillRect(cx - 46, 24, 92, 1, pal::Accent);
+
+    const auto& table = scoresDb_.highScores();
+    if (table.empty()) {
+        renderer_.textCentered(cx, 100, "NO SCORES YET", pal::TextDim);
+    } else {
+        constexpr int RANK_X = 20, NAME_X = 44, SCORE_X = 116, LEVEL_X = 190;
+        renderer_.text(NAME_X,  34, "PLAYER", pal::TextDim);
+        renderer_.text(SCORE_X, 34, "SCORE",  pal::TextDim);
+        renderer_.text(LEVEL_X, 34, "ROUND",  pal::TextDim);
+
+        int y = 46;
+        for (size_t i = 0; i < table.size(); ++i) {
+            const auto& h = table[i];
+            // The run just filed is picked out, so a player can see at a glance
+            // where they landed without counting down the list.
+            const bool mine = (lastRank_ > 0 && static_cast<int>(i) + 1 == lastRank_);
+            const Color ink = mine ? pal::Accent : pal::Text;
+
+            char rank[16];
+            std::snprintf(rank, sizeof rank, "%d.", static_cast<int>(i) + 1);
+            renderer_.text(RANK_X,  y, rank, pal::TextDim);
+            renderer_.text(NAME_X,  y, h.playerName, ink);
+            renderer_.text(SCORE_X, y, padNumber(h.score, 6), ink);
+
+            char lv[16];
+            std::snprintf(lv, sizeof lv, "%d", h.level);
+            renderer_.text(LEVEL_X, y, lv, ink);
+            y += 14;
+        }
+    }
+
+    if (!scoresDb_.ready())
+        renderer_.textCentered(cx, 196, "NOT SAVED - NO WRITE ACCESS", pal::Danger);
+    else if ((tick_ / 30) % 2 == 0)
+        renderer_.textCentered(cx, 206, touch_.enabled() ? "TAP TO CONTINUE"
+                                                         : "PRESS START", pal::TextDim);
 }
 
 void Game::renderWorld() {

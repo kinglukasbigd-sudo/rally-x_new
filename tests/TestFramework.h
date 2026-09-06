@@ -51,6 +51,14 @@ inline int run() {
             std::string(#a " == " #b " (got ") + std::to_string(va) +         \
             ", want " + std::to_string(vb) + ")"); } while (0)
 
+// Strings get their own macro: CHECK_EQ formats its values with to_string,
+// which has no overload for one.
+#define CHECK_STR(a, b)                                                       \
+    do { std::string va = (a), vb = (b);                                      \
+         if (va != vb) ::test::fail(__FILE__, __LINE__,                       \
+            std::string(#a " == " #b " (got \"") + va + "\", want \"" + vb + "\")"); \
+    } while (0)
+
 #define CHECK_NEAR(a, b, eps)                                                 \
     do { double va = (a), vb = (b);                                           \
          if (std::fabs(va - vb) > (eps)) ::test::fail(__FILE__, __LINE__,     \
